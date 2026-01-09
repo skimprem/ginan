@@ -164,7 +164,7 @@ struct URL
         }
 
         string justUrl;
-        auto   atPos = passNUrl.find("@");
+        auto   atPos = passNUrl.rfind("@");  // Changed from find to rfind to support @ in passwords
         if (atPos == string::npos)
         {
         }
