@@ -1,22 +1,22 @@
 #!/bin/bash
-# Скрипт для запуска PEA с учетными данными из .env файла
+# Script to run PEA with credentials from .env file
 
-# Загружаем переменные окружения из .env файла
+# Load environment variables from .env file
 if [ -f ../.env ]; then
     export $(cat ../.env | grep -v '^#' | xargs)
 else
-    echo "Ошибка: Файл .env не найден в корне репозитория"
-    echo "Создайте файл .env со следующим содержимым:"
+    echo "Error: .env file not found in repository root"
+    echo "Create .env file with the following content:"
     echo "NTRIP_USER=your_username"
     echo "NTRIP_PASS=your_password"
     exit 1
 fi
 
-# Заменяем плейсхолдеры на значения из переменных окружения
+# Replace placeholders with values from environment variables
 sed "s/your_ntrip_user/$NTRIP_USER/g; s/your_ntrip_pass/$NTRIP_PASS/g" rt_ppp_example.yaml > rt_ppp_example.yaml.tmp
 
-# Запускаем программу
+# Run the program
 ../bin/pea --config rt_ppp_example.yaml.tmp
 
-# Удаляем временный файл
+# Clean up temporary file
 rm -f rt_ppp_example.yaml.tmp
