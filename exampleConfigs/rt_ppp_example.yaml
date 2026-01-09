@@ -40,6 +40,10 @@ inputs:
 outputs:
   metadata:
     config_description: rt_ppp_example_<HASH>
+    # Для работы с NTRIP укажите учетные данные:
+    # 1. Создайте файл .env в корне репозитория (см. .env.example)
+    # 2. Используйте скрипт: ./run_rt_ppp.sh
+    # Или замените your_ntrip_user и your_ntrip_pass напрямую (не коммитьте!)
     user: your_ntrip_user
     pass: your_ntrip_pass
 
