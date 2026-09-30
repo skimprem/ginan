@@ -43,6 +43,58 @@ bool isInited(const BASE& base, const COMP& comp)
     return inited;
 }
 
+/** Use pointer arithmetic to keep track of variables that have been initialised
+ */
+template <typename BASE, typename COMP>
+void setInited(BASE& base, COMP& comp, bool init = true)
+{
+    if (init == false)
+    {
+        return;
+    }
+
+    int offset = (char*)(&comp) - (char*)(&base);
+
+    base.initialisedMap[offset] = true;
+}
+
+/** Set an option manually
+ */
+template <typename BASE, typename COMP, typename VALUE>
+void setOption(BASE& base, COMP& comp, VALUE value)
+{
+    comp = value;
+    setInited(base, comp);
+}
+
+/** Copy one parameter to another, if it has been initialised.
+ *
+ * Use pointer arithmetic to determine the offset of another parameter within its parent structure,
+ * assuming it has the same layout as this parameter in its parent.
+ */
+template <typename CONTAINER, typename ELEMENT>
+bool initIfNeeded(CONTAINER& thisContainer, const CONTAINER& thatContainer, ELEMENT& thisElement)
+{
+    CONTAINER*       thisContainer_ptr = &thisContainer;
+    const CONTAINER* thatContainer_ptr = &thatContainer;
+    ELEMENT*         thisElement_ptr   = &thisElement;
+    ELEMENT* thatElement_ptr = (ELEMENT*)(((char*)thisElement_ptr) +
+                                          ((char*)thatContainer_ptr - (char*)thisContainer_ptr));
+
+    auto& thatElement = *thatElement_ptr;
+
+    if (isInited(thatContainer, thatElement))
+    {
+        thisElement = thatElement;
+
+        setInited(thisContainer, thisElement);
+
+        return true;
+    }
+
+    return false;
+}
+
 struct SsrInputOptions
 {
     double code_bias_valid_time   = 3600;  ///< Valid time period of SSR code biases
@@ -53,7 +105,7 @@ struct SsrInputOptions
     bool   one_freq_phase_bias    = false;
 };
 
-struct SbsInputOptions
+struct SbasInputOptions
 {
     string host;          ///< hostname is passed as acsConfig.sisnet_inputs
     string port;          ///< port of SISNet steam
@@ -61,17 +113,13 @@ struct SbsInputOptions
     string pass;          ///< Password for SISnet stream access
     int    prn;           ///< prn of SBAS satellite
     int    freq;          ///< freq (L1 or L5) of SBAS channel
-    int    mt0   = 0;     ///< message that is replaced by MT0 (use 65 for SouthPAN L5)
+    int    mt0   = -1;    ///< message that is replaced by MT0 (use 65 for SouthPAN L5)
     int ems_year = 2059;  ///< reference year for EMS files (2059 should work between 2009 and 2158)
     bool use_do259 = false;  ///< Use original standard DO-259, intead of DO-259A, for DFMC, Keep as
                              ///< 'false' unless using DFMC
     bool pvs_on_dfmc  = false;  ///< Interpret DFMC messages as PVS messages
     bool prec_aproach = true;  ///< Limit SBAS solutions to precision approach (which limits maximum
                                ///< SBAS correction age)
-    bool dfmc_uire = false;    ///< Ionosphere residual from IF combination (use with DFMC only)
-    int  smth_win =
-        -1;  ///< Smoothing window to be used by SBAS (100, 1 second samples are normally used)
-    double smth_out = 10;  ///< Maximum outage to reset smoothing
 };
 
 /** Input source filenames and directories
@@ -91,6 +139,7 @@ struct InputOptions
 
     vector<string> atx_files;
     vector<string> snx_files;
+    vector<string> exclude_sinex_blocks;
     vector<string> nav_files;
     vector<string> ems_files;
     vector<string> sp3_files;
@@ -128,6 +177,7 @@ struct InputOptions
 
     map<string, vector<string>> rnx_inputs;
     map<string, vector<string>> ubx_inputs;
+    map<string, vector<string>> sbf_inputs;
     map<string, vector<string>> custom_inputs;
     map<string, vector<string>> obs_rtcm_inputs;
     map<string, vector<string>> pseudo_sp3_inputs;
@@ -165,10 +215,8 @@ struct InputOptions
     string stream_user;
     string stream_pass;
 
-    double sbs_time_delay = 0;
-
-    SsrInputOptions ssrInOpts;
-    SbsInputOptions sbsInOpts;
+    SsrInputOptions  ssrInOpts;
+    SbasInputOptions sbsInOpts;
 };
 
 struct IonexOptions
@@ -208,6 +256,10 @@ struct OutputOptions
     bool   record_raw_ubx    = false;
     string raw_ubx_directory = "<OUTPUTS_ROOT>";
     string raw_ubx_filename  = "<UBX_DIRECTORY>/<RECEIVER>-<LOGTIME>-OBS.rtcm";
+
+    bool   record_raw_sbf    = false;
+    string raw_sbf_directory = "<OUTPUTS_ROOT>";
+    string raw_sbf_filename  = "<SBF_DIRECTORY>/<RECEIVER>-<LOGTIME>-OBS.sbf";
 
     bool   record_raw_custom    = false;
     string raw_custom_directory = "<OUTPUTS_ROOT>";
@@ -485,11 +537,11 @@ struct MeasErrorHandler
 
 struct ErrorAccumulationHandler
 {
-    bool enable                           = false;
-    int  receiver_error_count_threshold   = 4;
-    int  receiver_error_epochs_threshold  = 4;
-    int  satellite_error_count_threshold  = 4;
-    int  satellite_error_epochs_threshold = 1;
+    bool enable                           = true;
+    int  receiver_error_count_threshold   = 0;
+    int  receiver_error_epochs_threshold  = 0;
+    int  satellite_error_count_threshold  = 0;
+    int  satellite_error_epochs_threshold = 0;
     int  state_error_count_threshold      = 4;
 };
 
@@ -530,6 +582,7 @@ struct GlobalOptions
     bool process_rts                 = false;
     bool process_ppp                 = false;
     bool process_orbits              = false;
+    bool process_sbas                = false;
 
     map<E_Sys, bool> process_sys;
     map<E_Sys, bool> solve_amb_for;
@@ -605,15 +658,6 @@ struct GlobalOptions
     map<E_Sys, string> constrain_phase_bias;
 
     map<E_Sys, double> eph_time_delay;
-    map<E_Sys, double> default_eph_time_delay = {
-        {E_Sys::GPS, -7200.0},
-        {E_Sys::GLO, 0.0},
-        {E_Sys::GAL, 0.0},
-        {E_Sys::QZS, 0.0},
-        {E_Sys::BDS, 0.0},
-        {E_Sys::LEO, 0.0},
-        {E_Sys::SBS, 0.0}
-    };
 
     bool common_sat_pco       = false;
     bool common_rec_pco       = false;
@@ -665,10 +709,10 @@ struct PrefitOptions
 
 struct PostfitOptions
 {
-    int    max_iterations        = 2;
+    int    max_iterations        = 10;
     bool   sigma_check           = false;
     bool   omega_test            = true;
-    double state_sigma_threshold = 4;
+    double state_sigma_threshold = 6;
     double meas_sigma_threshold  = 4;
 };
 
@@ -701,7 +745,6 @@ struct FilterOptions : RtsOptions
     bool joseph_stabilisation = false;
 
     E_Inverter lsq_inverter = E_Inverter::INV;
-    E_Inverter inverter     = E_Inverter::LDLT;
 
     LeastSquareOptions lsqOpts;
     PrefitOptions      prefitOpts;
@@ -734,6 +777,7 @@ struct PppOptions : FilterOptions
     bool use_rtk_combo           = false;
     bool merge_correlated_states = false;
     bool use_primary_signals     = false;
+    bool troposphere_as_residuals= false;
 
     bool add_eop_component = false;
 
@@ -749,7 +793,10 @@ struct PppOptions : FilterOptions
 struct SppOptions : FilterOptions
 {
     bool   always_reinitialise = false;
+    int    smooth_window       = -1;
+    bool   use_smooth_only     = false;
     int    max_lsq_iterations  = 12;
+    double smooth_outage       = 10;
     double elevation_mask_deg  = 0;
     double max_gdop            = 30;
     double sigma_scaling       = 1;
@@ -776,6 +823,31 @@ struct IonModelOptions : FilterOptions
     double         basis_sigma_limit = 1000;
 
     KalmanModel ion;
+};
+
+struct SbasOptions
+{
+    E_SbasMode mode = E_SbasMode::L1;
+
+    double sbas_time_delay  = 0;
+    bool   use_sbas_rec_var = false;
+
+    map<E_Sys, E_NavMsgType> sbas_nav_types = {
+        {E_Sys::GPS, E_NavMsgType::LNAV},
+        {E_Sys::GLO, E_NavMsgType::FDMA},
+        {E_Sys::GAL, E_NavMsgType::FNAV},
+        {E_Sys::BDS, E_NavMsgType::D1},
+        {E_Sys::QZS, E_NavMsgType::LNAV}
+    };
+
+    /// todo: May need to update this for BDS once ICD is released
+    map<E_Sys, vector<E_ObsCode>> sbas_code_priorities_map = {
+        {E_Sys::GPS, {E_ObsCode::L1C, E_ObsCode::L5Q, E_ObsCode::L5X}},
+        {E_Sys::GAL, {E_ObsCode::L1C, E_ObsCode::L5Q, E_ObsCode::L1X, E_ObsCode::L5X}},
+        {E_Sys::BDS, {E_ObsCode::L1C, E_ObsCode::L5Q, E_ObsCode::L5X}},
+        {E_Sys::QZS, {E_ObsCode::L1C, E_ObsCode::L5Q, E_ObsCode::L5X}},
+        {E_Sys::SBS, {E_ObsCode::L1C, E_ObsCode::L5Q}}
+    };
 };
 
 struct AmbROptions
@@ -984,9 +1056,9 @@ struct SatelliteKalmans : CommonKalmans, InertialKalmans, EmpKalmans
 
     SatelliteKalmans& operator+=(const SatelliteKalmans& rhs)
     {
-        CommonKalmans ::  operator+=(rhs);
-        InertialKalmans ::operator+=(rhs);
-        EmpKalmans ::     operator+=(rhs);
+        CommonKalmans::operator+=(rhs);
+        InertialKalmans::operator+=(rhs);
+        EmpKalmans::operator+=(rhs);
 
         return *this;
     }
@@ -1007,9 +1079,9 @@ struct ReceiverKalmans : CommonKalmans, InertialKalmans, EmpKalmans
 
     ReceiverKalmans& operator+=(const ReceiverKalmans& rhs)
     {
-        CommonKalmans ::  operator+=(rhs);
-        InertialKalmans ::operator+=(rhs);
-        EmpKalmans ::     operator+=(rhs);
+        CommonKalmans::operator+=(rhs);
+        InertialKalmans::operator+=(rhs);
+        EmpKalmans::operator+=(rhs);
 
         ambiguity += rhs.ambiguity;
         strain_rate += rhs.strain_rate;
@@ -1203,22 +1275,33 @@ struct ReceiverOptions : ReceiverKalmans, CommonOptions
 
     Rinex23Conversion rinex23Conv;
 
-    bool              kill           = false;
-    vector<E_ObsCode> zero_dcb_codes = {};
-    Vector3d          apriori_pos    = Vector3d::Zero();
-    string            antenna_type;
-    string            receiver_type;
-    string            domes_number;
-    string            site_description;
-    string            sat_id;
-    double            elevation_mask_deg        = 10;
-    E_Sys             receiver_reference_system = E_Sys::NONE;
+    bool                         kill           = false;
+    vector<E_ObsCode>            zero_dcb_codes = {};
+    Vector3d                     apriori_pos    = Vector3d::Zero();
+    string                       antenna_type;
+    string                       receiver_type;
+    vector<E_ReceiverMetaSource> meta_priority = {
+        E_ReceiverMetaSource::CONFIG,
+        E_ReceiverMetaSource::SINEX,
+        E_ReceiverMetaSource::RINEX,
+        E_ReceiverMetaSource::RTCM
+    };
+    string domes_number;
+    string site_description;
+    string sat_id;
+    double elevation_mask_deg        = 5;
+    E_Sys  receiver_reference_system = E_Sys::NONE;
 
     struct
     {
         bool     enable       = true;
         Vector3d eccentricity = Vector3d::Zero();
     } eccentricityModel;
+
+    ReceiverOptions()
+    {
+        posModel.sources = {E_Source::KALMAN, E_Source::META, E_Source::SPP, E_Source::REMOTE};
+    }
 
     struct
     {
@@ -1437,6 +1520,7 @@ struct ACSConfig : GlobalOptions, InputOptions, OutputOptions, DebugOptions
     vector<string>                               includedFilenames;
     map<string, std::filesystem::file_time_type> configModifyTimeMap;
     boost::program_options::variables_map        commandOpts;
+    bool                                         dry_run = false;
 
     static map<string, string> docs;
 
@@ -1470,6 +1554,7 @@ struct ACSConfig : GlobalOptions, InputOptions, OutputOptions, DebugOptions
     SsrOptions               ssrOpts;
     PppOptions               pppOpts;
     SppOptions               sppOpts;
+    SbasOptions              sbsOpts;
     SlrOptions               slrOpts;
     ExcludeOptions           exclude;
 

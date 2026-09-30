@@ -45,6 +45,7 @@ RUN \
     mkdir -p src/build \
     && cd src/build \
     && cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_DOC=TRUE .. \
+    && make -j$BUILD_THREADS unit_tests \
     && make -j$BUILD_THREADS $TARGET \
     && cd - \
     && rm -rf src/build
@@ -99,6 +100,7 @@ WORKDIR /tmp/
 RUN python3 -m pip install -r requirements.txt --no-cache-dir --break-system-packages
 
 ADD scripts /ginan/scripts
+ADD exampleConfigs /ginan/exampleConfigs
 
 # Copy the built PEA binary from the build stage
 COPY --from=ginan-build /ginan/bin/ /usr/bin/

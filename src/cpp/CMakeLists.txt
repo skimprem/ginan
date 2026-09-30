@@ -9,6 +9,13 @@ add_executable(pea
 
 		common/acsConfig.cpp
 		common/acsConfigDocs.cpp
+		common/sanityCheckers/ConfigSanityManager.cpp
+		common/sanityCheckers/EphemerisTimeDelayChecker.cpp
+		common/sanityCheckers/EpochToleranceChecker.cpp
+		common/sanityCheckers/IonosphericFreeComboChecker.cpp
+		common/sanityCheckers/IonosphericOutageChecker.cpp
+		common/sanityCheckers/RequiredSiteEccentricityChecker.cpp
+		common/sanityCheckers/SbasSanityChecker.cpp
 
 		3rdparty/jpl/jpl_eph.cpp
 
@@ -50,10 +57,11 @@ add_executable(pea
 		common/api.cpp
 		common/ntripBroadcast.cpp
 		common/acsQC.cpp
+		common/preprocessorFreqs.cpp
 		common/algebra.cpp
 		common/algebra_old.cpp
 		common/algebraTrace.cpp
-		common/kalmanBlas.cpp
+		# common/kalmanBlas.cpp
 		common/attitude.cpp
 		common/compare.cpp
 		common/antenna.cpp
@@ -84,6 +92,7 @@ add_executable(pea
 		common/ntripTrace.cpp
 		common/orbits.cpp
 		common/receiver.cpp
+		common/receiverMetadata.cpp
 		common/rinex.cpp
 		common/rtsSmoothing.cpp
 		common/rtcmDecoder.cpp
@@ -106,18 +115,21 @@ add_executable(pea
 		common/rinexObsWrite.cpp
 		common/tides.cpp
 		common/ubxDecoder.cpp
+		common/sbfDecoder.cpp
 		common/localAtmosRegion.cpp
 
 		common/streamNtrip.cpp
 		common/streamCustom.cpp
 		common/streamSerial.cpp
 		common/streamUbx.cpp
+		common/streamSbf.cpp
 		common/streamParser.cpp
 
 		iono/geomagField.cpp
 		iono/ionex.cpp
 		iono/ionoMeas.cpp
 		iono/ionoModel.cpp
+		iono/ionoSBAS.cpp
 		iono/ionoSpherical.cpp
 		iono/ionoSphericalCaps.cpp
 		iono/ionoBSplines.cpp
@@ -187,6 +199,8 @@ if(OpenMP_CXX_FOUND)
 endif()
 
 target_compile_definitions(pea PRIVATE
+							# LapackWrapper calls Fortran BLAS symbols directly, so its declarations
+							# must remain independent of Eigen's internal BLAS headers across versions.
 							EIGEN_USE_BLAS=1
 						)
 
@@ -221,55 +235,101 @@ if (NetCDF_FOUND)
 			loading/interpolate_loading.cpp
 			)
 
-	target_include_directories(otl PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}
-			${YAML_INCLUDE_DIRS}
-			${Boost_INCLUDE_DIRS}
-			${NETCDF_INCLUDES}
-			${NETCDF_INCLUDES_CXX}
-			)
+	# Use modern CMake targets if available from vcpkg, otherwise use legacy variables
+	if (TARGET netCDF::netcdf-cxx4 AND TARGET netCDF::netcdf)
+		# Using vcpkg's modern CMake targets
+		target_include_directories(otl PUBLIC
+				${CMAKE_CURRENT_SOURCE_DIR}
+				${YAML_INCLUDE_DIRS}
+				${Boost_INCLUDE_DIRS}
+				)
 
-	target_include_directories(make_otl_blq PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}
-			${YAML_INCLUDE_DIRS}
-			${Boost_INCLUDE_DIRS}
-			${NETCDF_INCLUDES}
-			${NETCDF_INCLUDES_CXX}
-			)
+		target_include_directories(make_otl_blq PUBLIC
+				${CMAKE_CURRENT_SOURCE_DIR}
+				${YAML_INCLUDE_DIRS}
+				${Boost_INCLUDE_DIRS}
+				)
 
-	target_include_directories(interpolate_loading PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}
-			${YAML_INCLUDE_DIRS}
-			${Boost_INCLUDE_DIRS}
-			${NETCDF_INCLUDES}
-			${NETCDF_INCLUDES_CXX}
-			)
+		target_include_directories(interpolate_loading PUBLIC
+				${CMAKE_CURRENT_SOURCE_DIR}
+				${YAML_INCLUDE_DIRS}
+				${Boost_INCLUDE_DIRS}
+				)
 
+		target_link_libraries(otl PUBLIC
+				netCDF::netcdf-cxx4
+				netCDF::netcdf
+				)
 
-	target_link_libraries(make_otl_blq PUBLIC
-			otl
-			${NETCDF_LIBRARIES_CXX}
-			${NETCDF_LIBRARIES}
-			Boost::timer
-			Boost::program_options
-			Boost::log
-			Boost::log_setup
-			${YAML_CPP_LIBRARIES}
-			${YAML_CPP_LIB}
-			)
+		target_link_libraries(make_otl_blq PUBLIC
+				otl
+				Boost::timer
+				Boost::program_options
+				Boost::log
+				Boost::log_setup
+				${YAML_CPP_LIBRARIES}
+				${YAML_CPP_LIB}
+				)
 
-	target_link_libraries(interpolate_loading PUBLIC
-			otl
-			${NETCDF_LIBRARIES_CXX}
-			${NETCDF_LIBRARIES}
-			Boost::timer
-			Boost::program_options
-			Boost::log
-			Boost::log_setup
-			${YAML_CPP_LIBRARIES}
-			${YAML_CPP_LIB}
-			)
+		target_link_libraries(interpolate_loading PUBLIC
+				otl
+				Boost::timer
+				Boost::program_options
+				Boost::log
+				Boost::log_setup
+				${YAML_CPP_LIBRARIES}
+				${YAML_CPP_LIB}
+				)
+	else()
+		# Legacy system-installation approach with FindNetCDF.cmake
+		target_include_directories(otl PUBLIC
+				${CMAKE_CURRENT_SOURCE_DIR}
+				${YAML_INCLUDE_DIRS}
+				${Boost_INCLUDE_DIRS}
+				${NETCDF_INCLUDES}
+				${NETCDF_INCLUDES_CXX}
+				)
 
+		target_include_directories(make_otl_blq PUBLIC
+				${CMAKE_CURRENT_SOURCE_DIR}
+				${YAML_INCLUDE_DIRS}
+				${Boost_INCLUDE_DIRS}
+				${NETCDF_INCLUDES}
+				${NETCDF_INCLUDES_CXX}
+				)
+
+		target_include_directories(interpolate_loading PUBLIC
+				${CMAKE_CURRENT_SOURCE_DIR}
+				${YAML_INCLUDE_DIRS}
+				${Boost_INCLUDE_DIRS}
+				${NETCDF_INCLUDES}
+				${NETCDF_INCLUDES_CXX}
+				)
+
+		target_link_libraries(make_otl_blq PUBLIC
+				otl
+				${NETCDF_LIBRARIES_CXX}
+				${NETCDF_LIBRARIES}
+				Boost::timer
+				Boost::program_options
+				Boost::log
+				Boost::log_setup
+				${YAML_CPP_LIBRARIES}
+				${YAML_CPP_LIB}
+				)
+
+		target_link_libraries(interpolate_loading PUBLIC
+				otl
+				${NETCDF_LIBRARIES_CXX}
+				${NETCDF_LIBRARIES}
+				Boost::timer
+				Boost::program_options
+				Boost::log
+				Boost::log_setup
+				${YAML_CPP_LIBRARIES}
+				${YAML_CPP_LIB}
+				)
+	endif()
 
 	if(OpenMP_CXX_FOUND)
 		target_link_libraries(make_otl_blq			PUBLIC OpenMP::OpenMP_CXX)
@@ -278,6 +338,11 @@ if (NetCDF_FOUND)
 endif()
 if(ENABLE_PARALLELISATION)
 	target_compile_definitions(pea PRIVATE ENABLE_PARALLELISATION=1)
+endif()
+
+string(TOLOWER "${BLAS_LIBRARIES};${LAPACK_LIBRARIES}" GINAN_BLAS_LIBRARIES_LOWER)
+if(GINAN_BLAS_LIBRARIES_LOWER MATCHES "openblas")
+	target_compile_definitions(pea PRIVATE GINAN_USE_OPENBLAS=1)
 endif()
 
 

@@ -10,6 +10,7 @@
 #include "common/eigenIncluder.hpp"
 #include "common/enums.h"
 #include "common/navigation.hpp"
+#include "common/sinex.hpp"
 #include "orbprop/coordinates.hpp"
 
 void updateLamMap(const GTime& time, SatPos& satPos)
@@ -49,6 +50,11 @@ void updateLamMap(const GTime& time, SatPos& satPos)
                 auto& geph = *static_cast<Geph*>(eph_ptr);
 
                 freqNum = geph.frq;
+            }
+            else
+            {
+                // Fallback to SINEX lookup for RINEX 2 or when ephemeris not available
+                freqNum = getGloFreqChannel(satPos.Sat, time, nav);
             }
         }
 
@@ -114,7 +120,7 @@ double sagnac(
         vel = omega.cross(rDest);
     }
 
-    // todo aaron, check which vel is required for slr things, still dest on outward journey?
+    // todo? check which vel is required for slr things, still dest on outward journey?
     return (rDest - rSource).dot(vel) / CLIGHT;
 }
 

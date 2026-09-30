@@ -3,6 +3,146 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
+# [4.1.4] 2026-09-16
+
+## Added
+
+Ginan core:
+- Added the `troposphere_as_residuals` PPP option, allowing troposphere residuals to be estimated with a Gauss-Markov process.
+
+## Fixed
+
+Ginan SouthPAN SBAS capabilities:
+- Fixed L1 and DFMC carrier-smoothing handling by interpreting smoothing windows and outages in seconds and validating them against the processing interval.
+- Fixed DFMC GPS IODE decoding and L1 slow-correction validity assignment, improving selection of valid SouthPAN corrections.
+- Fixed the PVS-on-DFMC clock-correction variance and SBAS receiver-variance calculation.
+- Prevented RAIM from running when SPP has already failed because too few valid measurements remain, and added detailed trace diagnostics for rejected pseudoranges and SBAS correction candidates.
+
+# [4.1.3] 2026-08-19
+
+## Added
+
+Ginan core:
+- Added configurable preprocessor frequency selection, allowing more flexible code/frequency priorities in preprocessing workflows.
+- Added a Doppler placeholder path in the preprocessor to support upcoming Doppler-based preprocessing work.
+
+## Changed
+
+Ginan core:
+- Updated broadcast ephemeris IODE selection to support use of the latest suitable ephemeris/IODE in real-time processing.
+- Added a safeguard to wait at least 30 seconds before changing IODE when uploading SSR streams.
+
+## Fixed
+
+Ginan core:
+- Fixed RINEX time parsing when `str2time` reads overflowing fixed-width fields.
+
+# [4.1.2] 2026-06-16
+
+## Added
+
+Ginan core:
+- Added RTCM extension work, including receiver metadata support and associated tests.
+- Added diagnostics for preprocessor slip detection, including SCDIA diagnostics and clearer slip reason handling.
+- Added dry-run options for checking configuration/execution flow without running a full processing job.
+- Added support for SINEX PSD annual-frequency corrections.
+
+GinanUI:
+- Added a YAML/HTML inspector path in GinanUI, including generated inspector styling and integration into the UI.
+- Added a YAML configuration tab and controls for config overwrite behaviour.
+- Added GinanUI support for ocean and atmospheric loading workflows.
+- Added visualisation pop-out support.
+- Added SINEX output controls to GinanUI.
+
+## Changed
+
+Ginan core:
+- Improved realtime operation: config reloads now retire removed streams, clear removed inputs, keep trace/RTCM outputs open while appending, and improve sync/reconnect diagnostics.
+- Improved stream/file handling by keeping file streams open across parses and reducing unnecessary open/close cycles.
+- Improved data handling for multiple input streams, EOF handling, start/end epoch logic, and stream state checks.
+- Updated preprocessor so basic preparation still runs when the preprocessor is disabled.
+
+GinanUI:
+- Refactored GinanUI into smaller controllers/models for maintainability and accessibility.
+- Improved GinanUI config update paths and visualisation controls.
+
+Build and dependencies:
+- Added Eigen 5 compatibility using a simpler integration path after the initial migration approach proved unsuitable.
+- Improved Eigen/BLAS compatibility and Windows portability.
+- Added CI/vcpkg updates for dependency unit testing.
+
+## Fixed
+
+Ginan core:
+- Fixed RTS/chunking output and chunk-parallel transition handling.
+- Fixed loading grid longitude handling for 0-360 degree grids.
+- Fixed unsafe `nullStream` behaviour in multi-threaded runs.
+
+GinanUI:
+- Fixed duplicate `.pos` plotting for multi-day observations.
+- Fixed restoration handling for `igs_satellite_metadata.snx`.
+
+# [4.1.1] 2026-02-12
+
+## Added
+
+Ginan core:
+- Added support for reading GLONASS satellites from RINEX 2 files.
+
+GinanUI:
+- Added apriori position as a configuration option in the interface.
+- Added support for running faster-rate clocks, including 1 Hz to 100 Hz workflows.
+- Added SINEX downloading and validation support.
+- Added download verification against CDDIS checksums.
+- Added support for using archived products when they are already available.
+
+## Fixed
+
+Ginan core:
+- Fixed reading CRLF-ended RINEX files in Windows binaries.
+- Fixed configuration parsing so station and receiver names can start with a number, for example `4RMA00AUS`.
+
+# [4.1] 2026-01-30
+
+## Added
+
+Ginan SouthPAN SBAS capabilities:
+- Separate SBAS processing modes
+- Choice of running L1 SBAS, DFMC (dual-frequency multi-constellation) and PVS (Precise Point Positioning Via SouthPAN)
+- SBF (Septentrio) input
+- Included sanity check configurations for SBAS, DFMC and PVS
+
+Additional features and fixes to the GinanUI:
+- "Constellations" config tab for managing code priorities for the selected PPP provider/series/project
+- "Output" config tab for specifying PEA output files
+- "Reset Config" button to reset the UI and configuration to a blank state
+- Support for downloading products from the REPRO3 directory for older RINEX files
+- Verification of PPP product constellations against RINEX constellations using the corresponding .SP3 file
+- Detection of supported code priorities for PPP products using the corresponding .BIA file
+- Button to open the Ginan-UI user manual from the interface
+
+## Changed
+
+GinanUI changes:
+- UI panels are now resizable
+- Disabled plot visualisation when the corresponding output file is not enabled
+
+## Fixed
+
+Ginan fixes:
+- Fixed SSR uploading issues - RTCM message codes were incorrectly assigned
+- Fixed Code bias state errors - Force state errors to zero if corresponding states are fully constrained (zero variances).
+
+GinanUI fixes:
+- Fixed detecting available dynamic products when version identifier is not "0". Will now search for the lowest valid version identifier
+- Fixed input locking while processing is running to prevent post-hoc configuration changes
+
+## Deprecated
+
+## Removed
+
+## Security
+
 # [4.0] 2025-12-16
 
 ## Added

@@ -1,3 +1,11 @@
+"""
+Defines common directory and file path constants used throughout Ginan-UI.
+
+Resolves paths correctly for both development mode and PyInstaller-bundled
+distributions, exposing constants for the template YAML, generated YAML,
+input products directory, and user manual
+"""
+
 import sys
 from pathlib import Path
 
@@ -5,13 +13,27 @@ def get_base_path():
     """Get the base path for resources, handling both development and PyInstaller bundled modes."""
     if getattr(sys, 'frozen', False):
         # Running in PyInstaller bundle - sys._MEIPASS is _internal/
-        # and app folder is at _internal/app/
-        return Path(sys._MEIPASS) / "app"
+        # and app folder is at _internal/scripts/GinanUI/app/
+        return Path(sys._MEIPASS) / "scripts" / "GinanUI" / "app"
     else:
         # Running in development mode - __file__ is in app/utils/
         return Path(__file__).parent.parent
 
+def get_user_manual_path():
+    """Get the path to the user manual, handling both development and PyInstaller bundled modes."""
+    if getattr(sys, 'frozen', False):
+        # Running in PyInstaller bundle - look in _internal/scripts/GinanUI/docs/
+        return Path(sys._MEIPASS) / "scripts" / "GinanUI" / "docs" / "USER_MANUAL.md"
+    else:
+        # Running in development mode - __file__ is in app/utils/
+        return Path(__file__).parent.parent.parent / "docs" / "USER_MANUAL.md"
+
+# Project filepath constants
+# Used to build relative file paths on the user's system
 BASE_PATH = get_base_path()
 TEMPLATE_PATH = BASE_PATH / "resources" / "Yaml" / "default_config.yaml"
 GENERATED_YAML = BASE_PATH / "resources" / "ppp_generated.yaml"
 INPUT_PRODUCTS_PATH = BASE_PATH / "resources" / "inputData" / "products"
+TABLES_PRODUCTS_PATH = INPUT_PRODUCTS_PATH / "tables"
+USER_MANUAL_PATH = get_user_manual_path()
+INSPECTOR_HTML_PATH = BASE_PATH / "resources" / "Yaml" / "GinanYAMLInspector.html"

@@ -25,6 +25,7 @@
 #include "common/compare.hpp"
 #include "common/constants.hpp"
 #include "common/debug.hpp"
+#include "common/sanityCheckers/ConfigSanityManager.hpp"
 #include "configurator/htmlFooterTemplate.hpp"
 #include "configurator/htmlHeaderTemplate.hpp"
 #include "pea/inputsOutputs.hpp"
@@ -322,6 +323,7 @@ void replaceTags(string& str)  ///< String to replace macros within
         repeat |= replaceString(str, "<RTCM_OBS_DIRECTORY>", acsConfig.rtcm_obs_directory);
         repeat |= replaceString(str, "<CUSTOM_DIRECTORY>", acsConfig.raw_custom_directory);
         repeat |= replaceString(str, "<UBX_DIRECTORY>", acsConfig.raw_ubx_directory);
+        repeat |= replaceString(str, "<SBF_DIRECTORY>", acsConfig.raw_sbf_directory);
         repeat |= replaceString(str, "<SLR_OBS_DIRECTORY>", acsConfig.slr_obs_directory);
         repeat |= replaceString(str, "<TROP_SINEX_DIRECTORY>", acsConfig.trop_sinex_directory);
         repeat |= replaceString(str, "<EMS_DIRECTORY>", acsConfig.ems_directory);
@@ -507,6 +509,9 @@ string stringify(vector<TYPE> vec)
     return output;
 }
 
+/** Get a stack of clean valid tokens, such those without symbolic and numeric prefixes, and the
+ * prefix of the last config token
+ */
 string nonNumericStack(const string& stack, string& cutstr, bool colon = true)
 {
     string token;
@@ -516,15 +521,43 @@ string nonNumericStack(const string& stack, string& cutstr, bool colon = true)
 
     while (getline(ss, token, ':'))
     {
-        size_t found = token.find_first_not_of("0123456789!@#: ");
-        if (found != std::string::npos)
+        cutstr = "";
+
+        // A valid config token should not contain any of '!', '@' and '#', so first get the
+        // trailing substring without any of them
+        size_t lastSymbol = token.find_last_of("!@#");
+        if (lastSymbol != std::string::npos)
         {
-            cutstr = token.substr(0, found);
-            token  = token.substr(found);
+            cutstr += token.substr(0, lastSymbol + 1);
+            token = token.substr(lastSymbol + 1);
+        }
+
+        // Trim leading and trailing whitespace, otherwise the first non-prefix could be ' '
+        boost::trim(token);
+
+        // The leading number (any digits) followed by whitespace is used for sorting configs (e.g.
+        // '0 output'), but if the leading character is not a number (e.g. 'A123'), or there is no
+        // whitespace between the leading number and the rest of the string (e.g. '1ABC'), it should
+        // be the config token. Pure numbers are also accepted as valid configs.
+        size_t firstNonPrefix = token.find_first_not_of("0123456789");
+        if (firstNonPrefix != std::string::npos && token[firstNonPrefix] == ' ')
+        {
+            cutstr += token.substr(0, firstNonPrefix);
+            token = token.substr(firstNonPrefix + 1);
+        }
+
+        // Trim leading whitespace again in case there're multiple ' ' following leading number
+        boost::trim(token);
+
+        if (token.size() > 0)
+        {
             newStack += token;
             if (colon)
                 newStack += ":";
         }
+
+        // Trim leading and trailing whitespace in prefix
+        boost::trim(cutstr);
     }
 
     return newStack;
@@ -811,13 +844,15 @@ void outputDefaultSiblings(
                         while ((pos_end = enums.find(',', pos_start)) != string::npos)
                         {
                             string token = enums.substr(pos_start, pos_end - pos_start);
-                            pos_start    = pos_end + 1;
+                            boost::algorithm::trim(token);
+                            pos_start = pos_end + 1;
                             html << "\n"
                                  << htmlIndentor << "<option value='" << token << "'>" << token
                                  << "</option>";
                         }
                         // get last one
                         string token = enums.substr(pos_start);
+                        boost::algorithm::trim(token);
                         html << "\n"
                              << htmlIndentor << "<option value='" << token << "'>" << token
                              << "</option>";
@@ -858,7 +893,7 @@ void ACSConfig::outputDefaultConfiguration(int level)
 
     html << htmlHeaderTemplate << "\n";
 
-    auto it = acsConfig.yamlDefaults.begin();
+    auto it = yamlDefaults.begin();
 
     Indentor indentor;
     Indentor htmlIndentor;
@@ -1438,6 +1473,7 @@ void ACSConfig::info(Trace& s)  ///< Trace file to output to
     ss << "\tMinimum Constraints: " << process_minimum_constraints << "\n";
     ss << "\tIonospheric:         " << process_ionosphere << "\n";
     ss << "\tRTS Smoothing:       " << process_rts << "\n";
+    ss << "\tSBAS:                " << process_sbas << "\n";
     ss << "\n";
 
     ss << "Systems:\n";
@@ -1823,21 +1859,6 @@ bool tryGetEnumVec(
     return true;
 }
 
-/** Use pointer arithmetic to keep track of variables that have been initialised
- */
-template <typename BASE, typename COMP>
-void setInited(BASE& base, COMP& comp, bool init = true)
-{
-    if (init == false)
-    {
-        return;
-    }
-
-    int offset = (char*)(&comp) - (char*)(&base);
-
-    base.initialisedMap[offset] = true;
-}
-
 /** Set the variables associated with kalman filter states from yaml
  */
 void tryGetKalmanFromYaml(
@@ -2026,7 +2047,11 @@ bool tryGetMappedList(
     }
 
     vector<string> optsList;
-    found |= tryGetFromOpts(optsList, commandOpts, {key});
+    if (tryGetFromOpts(optsList, commandOpts, {key}))
+    {
+        found = true;
+        mappedList.clear();
+    }
 
     for (auto& value : optsList)
     {
@@ -2066,7 +2091,7 @@ void tryGetStreamFromYaml(
         if (msgType == RtcmMessageType::IGS_SSR)
             for (auto subType : magic_enum::enum_values<IgsSSRSubtype>())
             {
-                string str = (boost::format("@ rtcm_%4d_%03d") % static_cast<int>(msgType) %
+                string str = (boost::format("@ rtcm_%04d_%03d") % rtcmTypeToMessageNumber(msgType) %
                               static_cast<int>(subType))
                                  .str();
 
@@ -2088,7 +2113,7 @@ void tryGetStreamFromYaml(
         else if (msgType == RtcmMessageType::COMPACT_SSR)
             for (auto subType : magic_enum::enum_values<CompactSSRSubtype>())
             {
-                string str = (boost::format("@ rtcm_%4d_%02d") % static_cast<int>(msgType) %
+                string str = (boost::format("@ rtcm_%04d_%02d") % rtcmTypeToMessageNumber(msgType) %
                               static_cast<int>(subType))
                                  .str();
 
@@ -2109,7 +2134,7 @@ void tryGetStreamFromYaml(
 
         else
         {
-            string str = "@ rtcm_" + std::to_string(static_cast<int>(msgType));
+            string str = (boost::format("@ rtcm_%04d") % rtcmTypeToMessageNumber(msgType)).str();
 
             auto msgOptions =
                 stringsToYamlObject(outStreamsYaml, {"0@ messages", str}, "Message type to output");
@@ -2130,34 +2155,6 @@ void tryGetStreamFromYaml(
 
 const string estimation_parameters_str = "4! estimation_parameters";
 const string processing_options_str    = "2! processing_options";
-
-/** Copy one parameter to another, if it has been initialised.
- *
- * Use pointer arithmetic to determine the offset of another parameter within its parent structure,
- * assuming it has the same layout as this parameter in its parent.
- */
-template <typename CONTAINER, typename ELEMENT>
-bool initIfNeeded(CONTAINER& thisContainer, const CONTAINER& thatContainer, ELEMENT& thisElement)
-{
-    CONTAINER*       thisContainer_ptr = &thisContainer;
-    const CONTAINER* thatContainer_ptr = &thatContainer;
-    ELEMENT*         thisElement_ptr   = &thisElement;
-    ELEMENT*         thatElement_ptr   = (ELEMENT*)(((char*)thisElement_ptr) +
-                                          ((char*)thatContainer_ptr - (char*)thisContainer_ptr));
-
-    auto& thatElement = *thatElement_ptr;
-
-    if (isInited(thatContainer, thatElement))
-    {
-        thisElement = thatElement;
-
-        setInited(thisContainer, thisElement);
-
-        return true;
-    }
-
-    return false;
-}
 
 CommonOptions& CommonOptions::operator+=(const CommonOptions& rhs)
 {
@@ -2245,9 +2242,9 @@ KalmanModel& KalmanModel::operator+=(const KalmanModel& rhs)
 
 SatelliteOptions& SatelliteOptions::operator+=(const SatelliteOptions& rhs)
 {
-    SatelliteKalmans ::operator+=(rhs);
-    CommonOptions ::   operator+=(rhs);
-    OrbitOptions ::    operator+=(rhs);
+    SatelliteKalmans::operator+=(rhs);
+    CommonOptions::operator+=(rhs);
+    OrbitOptions::operator+=(rhs);
 
     initIfNeeded(*this, rhs, error_model);
     initIfNeeded(*this, rhs, code_sigma);
@@ -2260,8 +2257,8 @@ SatelliteOptions& SatelliteOptions::operator+=(const SatelliteOptions& rhs)
 
 ReceiverOptions& ReceiverOptions::operator+=(const ReceiverOptions& rhs)
 {
-    ReceiverKalmans ::operator+=(rhs);
-    CommonOptions ::  operator+=(rhs);
+    ReceiverKalmans::operator+=(rhs);
+    CommonOptions::operator+=(rhs);
 
     rinex23Conv += rhs.rinex23Conv;
 
@@ -2270,6 +2267,7 @@ ReceiverOptions& ReceiverOptions::operator+=(const ReceiverOptions& rhs)
     initIfNeeded(*this, rhs, apriori_pos);
     initIfNeeded(*this, rhs, antenna_type);
     initIfNeeded(*this, rhs, receiver_type);
+    initIfNeeded(*this, rhs, meta_priority);
     initIfNeeded(*this, rhs, domes_number);
     initIfNeeded(*this, rhs, site_description);
 
@@ -2575,7 +2573,7 @@ void tryGetKalmanFromYaml(
 /** Set common options from yaml
  */
 void tryGetKalmanFromYaml(
-    CommonKalmans&        comOpts,       ///< Receiver options variable to output to
+    CommonKalmans&        comOpts,       ///< Common options variable to output to
     NodeStack             yamlBase,      ///< Yaml node to search within
     const vector<string>& descriptorVec  ///< List of strings of keys of yaml hierarchy
 )
@@ -2658,10 +2656,10 @@ void getKalmanFromYaml(
     tryGetKalmanFromYaml(recOpts.trop_maps, recNode, "1@ trop_maps", "Troposphere ZWD mapping");
 }
 
-/** Set common options from yaml
+/** Set orbit options from yaml
  */
 void getOptionsFromYaml(
-    OrbitOptions&         orbOpts,       ///< Satellite options variable to output to
+    OrbitOptions&         orbOpts,       ///< Orbit options variable to output to
     NodeStack             yamlBase,      ///< Yaml node to search within
     const vector<string>& descriptorVec  ///< List of strings of keys of yaml hierarchy
 )
@@ -2969,7 +2967,7 @@ void getOptionsFromYaml(
 /** Set common options from yaml
  */
 void getOptionsFromYaml(
-    CommonOptions&        comOpts,       ///< Satellite options variable to output to
+    CommonOptions&        comOpts,       ///< Common options variable to output to
     NodeStack             yamlBase,      ///< Yaml node to search within
     const vector<string>& descriptorVec  ///< List of strings of keys of yaml hierarchy
 )
@@ -3386,7 +3384,7 @@ void getOptionsFromYaml(
             "Coherent ionosphere models can improve estimation of biases and allow use with single "
             "frequency receivers"
         );
-        auto troposhpere = stringsToYamlObject(
+        auto troposphere = stringsToYamlObject(
             modelsNode,
             {"@ troposphere"},
             "Tropospheric modelling accounts for delays due to refraction of light in water vapour"
@@ -3438,6 +3436,16 @@ void getOptionsFromYaml(
             thing,
             tryGetFromYaml(thing, recNode, {"4@ receiver_type"}, "Type of gnss receiver hardware")
         );
+    }
+    {
+        auto& thing = recOpts.meta_priority;
+        bool  found = tryGetEnumVec(
+            thing,
+            recNode,
+            {"4@ meta_priority"},
+            "Priority order for resolving receiver metadata across config, sinex, rinex, and rtcm"
+        );
+        setInited(recOpts, thing, found);
     }
     {
         auto& thing = recOpts.domes_number;
@@ -4304,10 +4312,8 @@ bool configure(
         ("yaml-defaults,Y", boost::program_options::value<int>(), "Print set of parsed parameters and their default values according to their priority level (1-3), and generate configurator.html for visual editing of yaml files")
         ("config_description,d", boost::program_options::value<string>(), "Configuration description")
         ("level,l", boost::program_options::value<int>(), "Trace level")
-        ("fatal_message_level,L", boost::program_options::value<int>(), "Fatal error level")
-        ("elevation_mask,e", boost::program_options::value<float>(), "Elevation Mask")
         ("max_epochs,n", boost::program_options::value<int>(), "Maximum Epochs")
-        ("epoch_interval,i", boost::program_options::value<float>(), "Epoch Interval")
+        ("epoch_interval,i", boost::program_options::value<double>(), "Epoch Interval")
         ("user,u", boost::program_options::value<string>(), "Username for RTCM streams")
         ("pass,p", boost::program_options::value<string>(), "Password for RTCM streams")
         ("config,y", boost::program_options::value<vector<string>>()->multitoken(), "Configuration file")
@@ -4322,33 +4328,30 @@ bool configure(
         ("dcb_files", boost::program_options::value<vector<string>>()->multitoken(), "Code Bias (DCB) files")
         ("bsx_files", boost::program_options::value<vector<string>>()->multitoken(), "Bias Sinex (BSX) files")
         ("ion_files", boost::program_options::value<vector<string>>()->multitoken(), "Ionosphere (IONEX) files")
-        ("igrf_files", boost::program_options::value<vector<string>>()->multitoken(), "Geomagnetic field coefficients (IGRF) file")
-        ("ocean_tide_loading_blq_files", boost::program_options::value<vector<string>>()->multitoken(), "BLQ (Ocean tidal loading) files")
-        ("atmos_tide_loading_blq_files", boost::program_options::value<vector<string>>()->multitoken(), "BLQ (Atmospheric tidal loading) files")
         ("erp_files", boost::program_options::value<vector<string>>()->multitoken(), "ERP files")
         ("rnx_inputs,r", boost::program_options::value<vector<string>>()->multitoken(), "RINEX receiver inputs")
         ("ubx_inputs", boost::program_options::value<vector<string>>()->multitoken(), "UBX receiver inputs")
+        ("sbf_inputs", boost::program_options::value<vector<string>>()->multitoken(), "SBF receiver inputs")
         ("rtcm_inputs", boost::program_options::value<vector<string>>()->multitoken(), "RTCM receiver inputs")
-        ("egm_files", boost::program_options::value<vector<string>>()->multitoken(), "Earth gravity model coefficients file")
         ("crd_files", boost::program_options::value<vector<string>>()->multitoken(), "SLR CRD file")
-        ("slr_inputs", boost::program_options::value<vector<string>>()->multitoken(), "Tabular SLR OBS receiver file")
-        ("planetary_ephemeris_files", boost::program_options::value<vector<string>>()->multitoken(), "JPL planetary and lunar ephemerides file")
         ("inputs_root", boost::program_options::value<string>(), "Root to apply to non-absolute input locations")
         ("outputs_root", boost::program_options::value<string>(), "Root to apply to non-absolute output locations")
         ("start_epoch", boost::program_options::value<string>(), "Start date/time")
         ("end_epoch", boost::program_options::value<string>(), "Stop date/time")
+        ("dry-run", "Parse config, perform sanity checks, and exit")
         // 	("run_rts_only",					boost::program_options::value<string>(),						"RTS filename (without _xxxxx suffix)")
         ("dump-config-only", "Dump the configuration and exit")
         ("compare_clocks", "Compare clock files")
         ("compare_orbits", "Compare sp3 files")
-        ("compare_attitudes", "Compare orbex files")
-        ;
+        ("compare_attitudes", "Compare orbex files");
 
     boost::program_options::variables_map vm;
 
     boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
 
     boost::program_options::notify(vm);
+
+    acsConfig.dry_run = vm.count("dry-run");
 
     if (vm.count("help") || argc == 1)
     {
@@ -4505,40 +4508,8 @@ bool configure(
 
 void ACSConfig::sanityChecks()
 {
-    if (ionErrors.outage_reset_limit < epoch_interval)
-        BOOST_LOG_TRIVIAL(warning) << "ionospheric_components:outage_reset_limit < "
-                                      "epoch_interval, but it probably shouldnt be";
-
-    if (acsConfig.simulate_real_time == false)
-    {
-        for (E_Sys sys : magic_enum::enum_values<E_Sys>())
-        {
-            eph_time_delay[sys] = default_eph_time_delay[sys];
-        }
-    }
-
-    if (acsConfig.pppOpts.ionoOpts.use_if_combo)
-    {
-        for (auto& [id, recOpts] : recOptsMap)
-        {
-            if (recOpts.ionospheric_component2)
-            {
-                recOpts.ionospheric_component2 = false;
-                BOOST_LOG_TRIVIAL(warning)
-                    << "Higher-order ionospheric corrections are not supported when "
-                       "use_if_combo is enabled, "
-                       "setting ionospheric_components:use_2nd_order to false";
-            }
-            if (recOpts.ionospheric_component3)
-            {
-                recOpts.ionospheric_component3 = false;
-                BOOST_LOG_TRIVIAL(warning)
-                    << "Higher-order ionospheric corrections are not supported when "
-                       "use_if_combo is enabled, "
-                       "setting ionospheric_components:use_3rd_order to false";
-            }
-        }
-    }
+    auto sanityManager = ConfigSanityManager::defaultManager();
+    sanityManager.runAllChecks(*this);
 }
 
 bool ACSConfig::parse()
@@ -4591,11 +4562,24 @@ bool ACSConfig::parse(
     satOptsMap.clear();
     recOptsMap.clear();
     defaultOutputOptions();
+    exclude_sinex_blocks.clear();
+
+    // Clear input stream definitions so a live config reload reflects removals as well as adds.
+    sisnet_inputs.clear();
+    nav_rtcm_inputs.clear();
+    qzs_rtcm_inputs.clear();
+    rnx_inputs.clear();
+    ubx_inputs.clear();
+    sbf_inputs.clear();
+    custom_inputs.clear();
+    obs_rtcm_inputs.clear();
+    pseudo_sp3_inputs.clear();
+    pseudo_snx_inputs.clear();
 
     for (E_Sys sys : magic_enum::enum_values<E_Sys>())
     {
         code_priorities[sys] = default_code_priorities;
-        eph_time_delay[sys]  = default_eph_time_delay[sys];
+        eph_time_delay[sys]  = 0;
     }
 
     vector<string> yamlList;
@@ -4961,7 +4945,7 @@ bool ACSConfig::parse(
                     "in all trace files"
                 );
 
-                traceLevel = acsConfig.trace_level;
+                traceLevel = trace_level;
 
                 tryGetFromYaml(
                     output_residual_chain,
@@ -5759,9 +5743,25 @@ bool ACSConfig::parse(
                     tryGetFromYaml(raw_ubx_directory, raw_ubx, {"directory"})
                 );
                 conditionalPrefix(
-                    "<UBX_DIRECTORY>",
+                    "<RAW_UBX_DIRECTORY>",
                     raw_ubx_filename,
-                    tryGetFromYaml(raw_ubx_filename, raw_ubx, {"filename"})
+                    tryGetFromYaml(raw_ubx_filename, raw_ubx, {"@ filename"})
+                );
+            }
+
+            {
+                auto raw_sbf = stringsToYamlObject(outputs, {"6@ raw_sbf"});
+
+                tryGetFromYaml(record_raw_sbf, raw_sbf, {"0 output"});
+                conditionalPrefix(
+                    "<OUTPUTS_ROOT>",
+                    raw_sbf_directory,
+                    tryGetFromYaml(raw_sbf_directory, raw_sbf, {"directory"})
+                );
+                conditionalPrefix(
+                    "<RAW_SBF_DIRECTORY>",
+                    raw_sbf_filename,
+                    tryGetFromYaml(raw_sbf_filename, raw_sbf, {"@ filename"})
                 );
             }
 
@@ -6057,6 +6057,13 @@ bool ACSConfig::parse(
                 "Allow adding inpuut files which do not (yet) exist"
             );
 
+            tryGetFromYaml(
+                exclude_sinex_blocks,
+                inputs,
+                {"@ exclude_sinex_blocks"},
+                "List of SINEX blocks to skip while parsing"
+            );
+
             auto getAppendFiles = [&](vector<string>& output,
                                       NodeStack&      nodeStack,
                                       const string&   descriptor,
@@ -6064,11 +6071,22 @@ bool ACSConfig::parse(
             {
                 vector<string> vec;
 
-                tryGetFromAny(vec, commandOpts, nodeStack, {descriptor}, comment);
+                bool foundOpts = tryGetFromOpts(vec, commandOpts, {descriptor});
+                if (foundOpts == false)
+                {
+                    tryGetFromYaml(vec, nodeStack, {descriptor}, comment);
+                }
 
                 conditionalPrefix("<INPUTS_ROOT>", vec);
 
-                output.insert(output.end(), vec.begin(), vec.end());
+                if (foundOpts)
+                {
+                    output = vec;
+                }
+                else
+                {
+                    output.insert(output.end(), vec.begin(), vec.end());
+                }
             };
 
             getAppendFiles(atx_files, inputs, {"4! atx_files"}, "List of atx files to use");
@@ -6219,6 +6237,14 @@ bool ACSConfig::parse(
                     {"1# ubx_inputs"},
                     "<GNSS_OBS_ROOT>",
                     "List of ubxfiles   inputs to use"
+                );
+                tryGetMappedList(
+                    sbf_inputs,
+                    commandOpts,
+                    gnss_data,
+                    {"1# sbf_inputs"},
+                    "<GNSS_OBS_ROOT>",
+                    "List of sbffiles   inputs to use"
                 );
                 tryGetMappedList(
                     custom_inputs,
@@ -6561,16 +6587,11 @@ bool ACSConfig::parse(
                         "Carrier frequency of SBAS channel"
                     );
                     tryGetFromYaml(
-                        sbs_time_delay,
-                        sbas_inputs,
-                        {"@ sbas_time_delay"},
-                        "Time delay for SBAS corrections when simulating real-time in post-process"
-                    );
-                    tryGetFromYaml(
                         sbsInOpts.mt0,
                         sbas_inputs,
                         {"@ sbas_message_0"},
-                        "Message type replaced by MT0 (use 65 for SouthPAN L5)"
+                        "Message type replaced by MT0 (use 65 for SouthPAN L5, -1 will drop all "
+                        "sbas data upon receipt of type 0)"
                     );
                     tryGetFromYaml(
                         sbsInOpts.use_do259,
@@ -6592,30 +6613,10 @@ bool ACSConfig::parse(
                         "correction age)"
                     );
                     tryGetFromYaml(
-                        sbsInOpts.dfmc_uire,
-                        sbas_inputs,
-                        {"@ iono_residual_dfmc"},
-                        "Ionosphere residual from IF combination (use with DFMC only)"
-                    );
-                    tryGetFromYaml(
                         sbsInOpts.ems_year,
                         sbas_inputs,
                         {"@ ems_reference_year"},
                         "Reference year for EMS files (should be within 50 year of real value)"
-                    );
-                    tryGetFromYaml(
-                        sbsInOpts.smth_win,
-                        sbas_inputs,
-                        {"@ smoothing_window"},
-                        "Smoothing window to be used by SBAS (100, 1 second samples are normally "
-                        "used)"
-                    );
-                    tryGetFromYaml(
-                        sbsInOpts.smth_out,
-                        sbas_inputs,
-                        {"@ max_smooth_outage"},
-                        "Maximum outage to reset smoothing (10 seconds or 3 x obs_rate is "
-                        "recommended)"
                     );
                 }
             }
@@ -6667,6 +6668,12 @@ bool ACSConfig::parse(
                     process_modes,
                     {"@ slr"},
                     "Process SLR observations"
+                );
+                tryGetFromYaml(
+                    process_sbas,
+                    process_modes,
+                    {"! sbas"},
+                    "Perform PPP network or end user mode"
                 );
             }
 
@@ -6757,6 +6764,13 @@ bool ACSConfig::parse(
                     general,
                     {"@ equate_tropospheres"},
                     "Use same troposphere values for different receivers, useful for simulated rtk "
+                    "mode"
+                );
+                tryGetFromYaml(
+                    pppOpts.troposphere_as_residuals,
+                    general,
+                    {"@ troposphere_as_residuals"},
+                    "Estimate troposphere residuals instead of full value, useful to use gauss markov process"
                     "mode"
                 );
                 tryGetFromYaml(
@@ -6965,8 +6979,7 @@ bool ACSConfig::parse(
                         eph_time_delay[sys],
                         sys_options,
                         {"@ eph_time_delay"},
-                        "Time delay for Broadcast Ephmeris when simulating real-time in "
-                        "post-process"
+                        "Time delay before switching to next broadcast ephemeris when IODE changes"
                     );
                 }
             }
@@ -7498,15 +7511,6 @@ bool ACSConfig::parse(
                 }
 
                 {
-                    tryGetEnumOpt(
-                        filterOpts.inverter,
-                        nodeStack,
-                        {"@ inverter"},
-                        "Inverter to be used within the Kalman filter update stage, which may "
-                        "provide different "
-                        "performance outcomes in terms of processing time and accuracy and "
-                        "stability."
-                    );
                     tryGetFromYaml(
                         filterOpts.joseph_stabilisation,
                         nodeStack,
@@ -7996,6 +8000,24 @@ bool ACSConfig::parse(
                     {"@ always_reinitialise"},
                     "Reset SPP state to zero to avoid potential for lock-in of bad states"
                 );
+                tryGetFromYaml(
+                    sppOpts.smooth_window,
+                    spp,
+                    {"@ smoothing_window"},
+                    "Smooth pseudorange with this time window in seconds (default: -1, do not apply smoothing)"
+                );
+                tryGetFromYaml(
+                    sppOpts.use_smooth_only,
+                    spp,
+                    {"@ use_smooth_only"},
+                    "Only use measurements that have been smoothed up to the smoothing window"
+                );
+                tryGetFromYaml(
+                    sppOpts.smooth_outage,
+                    spp,
+                    {"@ smoothing_outage"},
+                    "Outage time in seconds to reset carrier smoothing"
+                );
                 tryGetEnumOpt(sppOpts.iono_mode, spp, {"@ iono_mode"});
                 tryGetEnumVec(
                     sppOpts.trop_models,
@@ -8034,6 +8056,32 @@ bool ACSConfig::parse(
                 );
 
                 getFilterOptions(spp, sppOpts);
+            }
+
+            // 			sbas
+            {
+                auto sbas = stringsToYamlObject(
+                    processing_options,
+                    {"4! sbas"},
+                    "Configurations for SBAS processing and its sub processes"
+                );
+
+                tryGetEnumOpt(sbsOpts.mode, sbas, {"@ mode"}, "SBAS service/processing mode, ");
+
+                tryGetFromYaml(
+                    sbsOpts.sbas_time_delay,
+                    sbas,
+                    {"@ sbas_time_delay"},
+                    "Time delay for SBAS corrections when simulating real-time in post-process"
+                );
+
+                tryGetFromYaml(
+                    sbsOpts.use_sbas_rec_var,
+                    sbas,
+                    {"@ use_sbas_rec_var"},
+                    "Override the receiver standard measurement variance models and replace it "
+                    "with SBAS standard (AAD-A)"
+                );
             }
 
             // 			preprocessor
@@ -8561,6 +8609,8 @@ bool ACSConfig::parse(
         globber(rnx_inputs);
         replaceTags(ubx_inputs);
         globber(ubx_inputs);
+        replaceTags(sbf_inputs);
+        globber(sbf_inputs);
         replaceTags(custom_inputs);
         globber(custom_inputs);
         replaceTags(obs_rtcm_inputs);
@@ -8602,6 +8652,8 @@ bool ACSConfig::parse(
         replaceTags(ionstec_filename);
         replaceTags(raw_ubx_directory);
         replaceTags(raw_ubx_filename);
+        replaceTags(raw_sbf_directory);
+        replaceTags(raw_sbf_filename);
         replaceTags(rtcm_nav_directory);
         replaceTags(rtcm_nav_filename);
         replaceTags(rtcm_obs_directory);
@@ -8668,7 +8720,7 @@ bool ACSConfig::parse(
         recurseYaml(filename, yaml);
     }
 
-    for (auto& [stack, defaults] : acsConfig.yamlDefaults)
+    for (auto& [stack, defaults] : yamlDefaults)
     {
         if (defaults.comment.empty())
         {

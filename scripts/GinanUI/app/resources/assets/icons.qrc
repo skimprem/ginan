@@ -1,0 +1,22 @@
+<RCC>
+  <qresource prefix="icon">
+    <file>help.png</file>
+    <file>help_hover.png</file>
+    <file>help_selected.png</file>
+    <file>checkbox_selected.png</file>
+    <file>checkbox_selected_disabled.png</file>
+    <file>checkbox_selected_hover.png</file>
+    <file>checkbox_selected_pressed.png</file>
+    <file>checkbox_unselected.png</file>
+    <file>checkbox_unselected_disabled.png</file>
+    <file>checkbox_unselected_hover.png</file>
+    <file>checkbox_unselected_pressed.png</file>
+    <file>checkbox_disabled.png</file>
+    <file>enlarge.png</file>
+    <file>enlarge_hover.png</file>
+    <file>enlarge_selected.png</file>
+    <file>open_in_browser.png</file>
+    <file>open_in_browser_hover.png</file>
+    <file>open_in_browser_selected.png</file>
+  </qresource>
+</RCC>

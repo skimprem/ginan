@@ -18,10 +18,11 @@ jobs:
             triplet: x64-linux
             artifact-name: ginan-linux-x64
             build-dir: linux-Release
-            cache-key: vcpkg-linux-v4
+            install-root: vcpkg_installed/linux
+            cache-key: vcpkg-linux-v5
             install-deps: |
               sudo apt-get update
-              sudo apt-get install -y build-essential cmake ninja-build curl zip unzip tar pkg-config git
+              sudo apt-get install -y build-essential cmake ninja-build curl zip unzip tar pkg-config git gfortran
             preset: release
             
           - name: macOS ARM64
@@ -29,29 +30,34 @@ jobs:
             triplet: arm64-osx
             artifact-name: ginan-macos-arm64
             build-dir: mac-arm64-Release
-            cache-key: vcpkg-macos-arm64-v4
+            install-root: vcpkg_installed/macos-arm64
+            cache-key: vcpkg-macos-arm64-v5
             install-deps: |
               brew install cmake ninja pkg-config libomp gcc
               echo "/opt/homebrew/bin" >> $GITHUB_PATH
             preset: macos-arm64-release
+            pin-cmake: true
             
           - name: macOS x64
             os: macos-15-intel
             triplet: x64-osx
             artifact-name: ginan-macos-x64
             build-dir: mac-x64-Release
-            cache-key: vcpkg-macos-x64-v3
+            install-root: vcpkg_installed/macos-x64
+            cache-key: vcpkg-macos-x64-v6
             install-deps: |
               brew install cmake ninja pkg-config libomp gcc
               echo "/usr/local/bin" >> $GITHUB_PATH
             preset: macos-x64-release
+            pin-cmake: true
             
           - name: Windows x64 (Cross)
             os: ubuntu-latest
             triplet: x64-mingw-static
             artifact-name: ginan-windows-x64
             build-dir: windows-cross-Release
-            cache-key: vcpkg-windows-cross-v4
+            install-root: vcpkg_installed/mingw
+            cache-key: vcpkg-windows-cross-v5
             install-deps: |
               sudo apt-get update
               sudo apt-get install -y build-essential cmake ninja-build curl zip unzip tar pkg-config git mingw-w64 g++-mingw-w64-x86-64 gcc-mingw-w64-x86-64
@@ -69,6 +75,15 @@ jobs:
     
     - name: Install system dependencies
       run: ${{ matrix.install-deps }}
+
+    - name: Pin CMake for macOS x64 vcpkg
+      if: matrix.pin-cmake == true
+      run: |
+        python3 -m venv "$RUNNER_TEMP/cmake-venv"
+        "$RUNNER_TEMP/cmake-venv/bin/python" -m pip install --upgrade pip
+        "$RUNNER_TEMP/cmake-venv/bin/python" -m pip install "cmake==3.31.10"
+        echo "$RUNNER_TEMP/cmake-venv/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/cmake-venv/bin/cmake" --version
     
     - name: Setup vcpkg binary cache
       run: |
@@ -82,28 +97,48 @@ jobs:
         path: |
           .vcpkg-cache
           vcpkg
-        key: ${{ matrix.cache-key }}-${{ hashFiles('vcpkg.json') }}
+        key: ${{ matrix.cache-key }}-${{ hashFiles('vcpkg.json', 'scripts/ci/vcpkg-overlay-ports/**') }}
         restore-keys: |
           ${{ matrix.cache-key }}-
     
     - name: Setup vcpkg
       run: |
-        if [ ! -d "vcpkg" ]; then
-          git clone https://github.com/Microsoft/vcpkg.git
-          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+        VCPKG_COMMIT="4c5ae6b55f3e3e39d291679f89822f496cf190ee"
+
+        if [ ! -d "vcpkg/.git" ]; then
+          git clone https://github.com/Microsoft/vcpkg.git vcpkg
         fi
-        echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> $GITHUB_ENV
+
+        git -C vcpkg fetch --depth 1 origin "$VCPKG_COMMIT"
+        git -C vcpkg checkout --detach "$VCPKG_COMMIT"
+
+        ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+        echo "VCPKG_ROOT=${{ github.workspace }}/vcpkg" >> "$GITHUB_ENV"
+        echo "VCPKG_OVERLAY_PORTS=${{ github.workspace }}/scripts/ci/vcpkg-overlay-ports" >> "$GITHUB_ENV"
     
     - name: Install vcpkg dependencies
       run: |
         export VCPKG_BUILD_TYPE=release
         cd ${{ github.workspace }}
+        cmake --version
         # Retry logic for transient network failures
         for i in 1 2 3; do
-          ./vcpkg/vcpkg install --triplet ${{ matrix.triplet }} --x-install-root=./vcpkg_installed ${{ matrix.vcpkg-extra-flags }} && break || {
-            echo "vcpkg install attempt $i failed, retrying...";
-            sleep 10;
-          }
+          if ./vcpkg/vcpkg install \
+              --triplet ${{ matrix.triplet }} \
+              --x-install-root=./${{ matrix.install-root }} \
+              --overlay-ports="$VCPKG_OVERLAY_PORTS" \
+              ${{ matrix.vcpkg-extra-flags }} \
+              --clean-after-build; then
+            break
+          fi
+
+          if [ "$i" -eq 3 ]; then
+            echo "vcpkg install failed after $i attempts"
+            exit 1
+          fi
+
+          echo "vcpkg install attempt $i failed, retrying..."
+          sleep 10
         done
     
     - name: Clean build directory
@@ -112,7 +147,7 @@ jobs:
     
     - name: Configure CMake
       working-directory: src
-      run: cmake --preset ${{ matrix.preset }}
+      run: cmake --preset ${{ matrix.preset }} -DVCPKG_OVERLAY_PORTS="$VCPKG_OVERLAY_PORTS"
     
     - name: Build
       working-directory: src
@@ -160,7 +195,6 @@ jobs:
             os: ubuntu-latest
             binary-artifact: ginan-linux-x64
             gui-artifact: ginan-gui-linux-x64
-            ui-sed-cmd: sed -i '24s/.*/from scripts.GinanUI.app.resources import ginan_logo_rc/' app/views/main_window_ui.py
             pyinstaller-args: --windowed
             extra-steps: ""
             
@@ -168,7 +202,6 @@ jobs:
             os: macos-15
             binary-artifact: ginan-macos-arm64
             gui-artifact: ginan-gui-macos-arm64
-            ui-sed-cmd: sed -i '' '24s/.*/from scripts.GinanUI.app.resources import ginan_logo_rc/' app/views/main_window_ui.py
             pyinstaller-args: --onedir --clean --target-arch arm64 --noconfirm
             extra-steps: macos
             
@@ -176,7 +209,6 @@ jobs:
             os: macos-15-intel
             binary-artifact: ginan-macos-x64
             gui-artifact: ginan-gui-macos-x64
-            ui-sed-cmd: sed -i '' '24s/.*/from scripts.GinanUI.app.resources import ginan_logo_rc/' app/views/main_window_ui.py
             pyinstaller-args: --onedir --clean --noconfirm
             extra-steps: macos
             
@@ -184,14 +216,6 @@ jobs:
             os: windows-latest
             binary-artifact: ginan-windows-x64
             gui-artifact: ginan-gui-windows-x64
-            ui-sed-cmd: |
-              (Get-Content app/views/main_window_ui.py) | ForEach-Object {
-                if ($_.ReadCount -eq 24) {
-                  "from scripts.GinanUI.app.resources import ginan_logo_rc"
-                } else {
-                  $_
-                }
-              } | Set-Content app/views/main_window_ui.py
             pyinstaller-args: --windowed
             pyinstaller-separator: ";"
             extra-steps: ""
@@ -221,20 +245,9 @@ jobs:
         pip install -r scripts/GinanUI/requirements.txt
         pip install pyinstaller
     
-    - name: Convert UI files to Python (Unix)
-      if: runner.os != 'Windows'
+    - name: Convert UI files to Python
       working-directory: scripts/GinanUI
-      run: |
-        pyside6-uic app/views/main_window.ui -o app/views/main_window_ui.py
-        ${{ matrix.ui-sed-cmd }}
-    
-    - name: Convert UI files to Python (Windows)
-      if: runner.os == 'Windows'
-      working-directory: scripts/GinanUI
-      shell: pwsh
-      run: |
-        pyside6-uic app/views/main_window.ui -o app/views/main_window_ui.py
-        ${{ matrix.ui-sed-cmd }}
+      run: python app/utils/ui_compilation.py
     
     - name: Make binaries executable (Unix)
       if: runner.os != 'Windows'
@@ -292,59 +305,83 @@ jobs:
       run: |
         python -m PyInstaller --name GinanUI \
           ${{ matrix.pyinstaller-args }} \
-          --add-data "scripts/GinanUI/app:app" \
+          --add-data "scripts/GinanUI/app:scripts/GinanUI/app" \
+          --add-data "scripts/GinanUI/docs:scripts/GinanUI/docs" \
           --add-data "scripts/plot_pos.py:scripts" \
+          --add-data "scripts/plot_trace_res.py:scripts" \
           --add-binary "bin/*:bin" \
           --hidden-import PySide6 \
           --hidden-import PySide6.QtWebEngineWidgets \
           --hidden-import PySide6.QtWebEngineCore \
           --hidden-import plotly \
           --hidden-import scripts.plot_pos \
+          --hidden-import scripts.plot_trace_res \
           --hidden-import scripts.GinanUI.app \
+          --hidden-import scripts.GinanUI.app.main_window \
           --hidden-import scripts.GinanUI.app.models \
           --hidden-import scripts.GinanUI.app.models.execution \
+          --hidden-import scripts.GinanUI.app.models.dl_products \
+          --hidden-import scripts.GinanUI.app.models.rinex_extractor \
+          --hidden-import scripts.GinanUI.app.models.archive_manager \
           --hidden-import scripts.GinanUI.app.controllers \
           --hidden-import scripts.GinanUI.app.controllers.input_controller \
+          --hidden-import scripts.GinanUI.app.controllers.general_config_controller \
+          --hidden-import scripts.GinanUI.app.controllers.constellation_config_controller \
+          --hidden-import scripts.GinanUI.app.controllers.output_config_controller \
           --hidden-import scripts.GinanUI.app.controllers.visualisation_controller \
           --hidden-import scripts.GinanUI.app.utils \
           --hidden-import scripts.GinanUI.app.utils.workers \
+          --hidden-import scripts.GinanUI.app.utils.logger \
+          --hidden-import scripts.GinanUI.app.utils.toast \
+          --hidden-import scripts.GinanUI.app.utils.ui_compilation \
           --hidden-import scripts.GinanUI.app.utils.cddis_credentials \
-          --hidden-import scripts.GinanUI.app.utils.cddis_email \
+          --hidden-import scripts.GinanUI.app.utils.cddis_connection \
           --hidden-import scripts.GinanUI.app.utils.common_dirs \
           --hidden-import scripts.GinanUI.app.utils.gn_functions \
           --hidden-import scripts.GinanUI.app.utils.yaml \
           --hidden-import scripts.GinanUI.app.views.main_window_ui \
-          --collect-all scripts.GinanUI \
           scripts/GinanUI/main.py
-    
+
     - name: Build GUI with PyInstaller (Windows)
       if: runner.os == 'Windows'
       run: |
         pyinstaller --name GinanUI `
           ${{ matrix.pyinstaller-args }} `
-          --add-data "scripts/GinanUI/app;app" `
+          --add-data "scripts/GinanUI/app;scripts/GinanUI/app" `
+          --add-data "scripts/GinanUI/docs;scripts/GinanUI/docs" `
           --add-data "scripts/plot_pos.py;scripts" `
+          --add-data "scripts/plot_trace_res.py;scripts" `
           --add-binary "bin/*;bin" `
           --hidden-import PySide6 `
           --hidden-import PySide6.QtWebEngineWidgets `
           --hidden-import PySide6.QtWebEngineCore `
           --hidden-import plotly `
           --hidden-import scripts.plot_pos `
+          --hidden-import scripts.plot_trace_res `
           --hidden-import scripts.GinanUI.app `
+          --hidden-import scripts.GinanUI.app.main_window `
           --hidden-import scripts.GinanUI.app.models `
           --hidden-import scripts.GinanUI.app.models.execution `
+          --hidden-import scripts.GinanUI.app.models.dl_products `
+          --hidden-import scripts.GinanUI.app.models.rinex_extractor `
+          --hidden-import scripts.GinanUI.app.models.archive_manager `
           --hidden-import scripts.GinanUI.app.controllers `
           --hidden-import scripts.GinanUI.app.controllers.input_controller `
+          --hidden-import scripts.GinanUI.app.controllers.general_config_controller `
+          --hidden-import scripts.GinanUI.app.controllers.constellation_config_controller `
+          --hidden-import scripts.GinanUI.app.controllers.output_config_controller `
           --hidden-import scripts.GinanUI.app.controllers.visualisation_controller `
           --hidden-import scripts.GinanUI.app.utils `
           --hidden-import scripts.GinanUI.app.utils.workers `
+          --hidden-import scripts.GinanUI.app.utils.logger `
+          --hidden-import scripts.GinanUI.app.utils.toast `
+          --hidden-import scripts.GinanUI.app.utils.ui_compilation `
           --hidden-import scripts.GinanUI.app.utils.cddis_credentials `
-          --hidden-import scripts.GinanUI.app.utils.cddis_email `
+          --hidden-import scripts.GinanUI.app.utils.cddis_connection `
           --hidden-import scripts.GinanUI.app.utils.common_dirs `
           --hidden-import scripts.GinanUI.app.utils.gn_functions `
           --hidden-import scripts.GinanUI.app.utils.yaml `
           --hidden-import scripts.GinanUI.app.views.main_window_ui `
-          --collect-all scripts.GinanUI `
           scripts/GinanUI/main.py
     
     # Post-build cleanup

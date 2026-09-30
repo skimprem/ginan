@@ -3,10 +3,12 @@
 #include <map>
 #include <memory>
 #include <thread>
+#include <vector>
 #include "architectureDocs.hpp"
 #include "common/acsConfig.hpp"
 #include "common/algebra.hpp"
 #include "common/algebraTrace.hpp"
+#include "common/blasThreading.hpp"
 #include "common/constants.hpp"
 #include "common/eigenIncluder.hpp"
 #include "common/lapackWrapper.hpp"
@@ -424,23 +426,12 @@ void RtsTimingLogger::logEpochTiming(
     GTime             epochStopTime
 )
 {
-    auto boostTime = formatTimeForLogging(filterData.kalmanPlus.time);
-
-    BOOST_LOG_TRIVIAL(info) << "Processed epoch" << " - " << boostTime << " (took "
+    BOOST_LOG_TRIVIAL(info) << "Processed epoch" << " - " << filterData.kalmanPlus.time << " (took "
                             << (epochStopTime - epochStartTime) << ")";
 
     updateTerminalProgress(filterData, epochStartTime, epochStopTime);
 
     epochStartTime = timeGet();
-}
-
-/** Format time for logging output */
-boost::posix_time::ptime RtsTimingLogger::formatTimeForLogging(const GTime& time)
-{
-    int fractionalMilliseconds = calculateFractionalMilliseconds(time);
-
-    return boost::posix_time::from_time_t((time_t)((PTime)time).bigTime) +
-           boost::posix_time::millisec(fractionalMilliseconds);
 }
 
 /** Update interactive terminal with progress information */
@@ -451,12 +442,6 @@ void RtsTimingLogger::updateTerminalProgress(
 )
 {
     // todo: function to delete?
-}
-
-/** Calculate fractional milliseconds from time */
-int RtsTimingLogger::calculateFractionalMilliseconds(const GTime& time)
-{
-    return (time.bigTime - (long int)time.bigTime) * 1000;
 }
 
 //================================================================================
@@ -540,7 +525,17 @@ bool FilterData::performRtsComputation(KFState& kfState, const RtsConfiguration&
 
     smoothedKF.time = kalmanPlus.time;
 
-    smoothedKF.P = (smoothedKF.P + smoothedKF.P.transpose()).eval() / 2;
+    // Symmetrize in-place without creating transpose copy
+    int n = smoothedKF.P.rows();
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = i + 1; j < n; j++)
+        {
+            double avg         = (smoothedKF.P(i, j) + smoothedKF.P(j, i)) * 0.5;
+            smoothedKF.P(i, j) = avg;
+            smoothedKF.P(j, i) = avg;
+        }
+    }
 
     // get process noise and dynamics
     auto& F = transitionMatrix;
@@ -562,17 +557,39 @@ bool FilterData::performRtsComputation(KFState& kfState, const RtsConfiguration&
     for (auto& [id, fcM] : kalmanMinus.filterChunkMap)
         filterChunks[id] = true;
 
+    struct RtsChunkWork
+    {
+        string id;
+        int    plusBegX  = 0;
+        int    plusNumX  = 0;
+        int    minusBegX = 0;
+        int    minusNumX = 0;
+    };
+
+    vector<RtsChunkWork> chunkWorkList;
+    chunkWorkList.reserve(filterChunks.size());
     for (auto& [id, dummy] : filterChunks)
     {
-        auto& fcP = kalmanPlus.filterChunkMap[id];
-        auto& fcM = kalmanMinus.filterChunkMap[id];
+        auto fcP_it = kalmanPlus.filterChunkMap.find(id);
+        auto fcM_it = kalmanMinus.filterChunkMap.find(id);
 
-        if (fcP.begX == 0)
+        FilterChunk fcP;
+        FilterChunk fcM;
+        if (fcP_it != kalmanPlus.filterChunkMap.end())
+        {
+            fcP = fcP_it->second;
+        }
+        if (fcM_it != kalmanMinus.filterChunkMap.end())
+        {
+            fcM = fcM_it->second;
+        }
+
+        if (fcP.begX == 0 && fcP.numX > 0)
         {
             fcP.begX = 1;
             fcP.numX -= 1;
         }
-        if (fcM.begX == 0)
+        if (fcM.begX == 0 && fcM.numX > 0)
         {
             fcM.begX = 1;
             fcM.numX -= 1;
@@ -584,83 +601,137 @@ bool FilterData::performRtsComputation(KFState& kfState, const RtsConfiguration&
             continue;
         }
 
-        MatrixXd Q    = kalmanMinus.P.block(fcM.begX, fcM.begX, fcM.numX, fcM.numX);
-        MatrixXd FP_  = FP.block(fcM.begX, fcP.begX, fcM.numX, fcP.numX);
-        int      n    = fcM.numX;
-        int      neqs = fcP.numX;
-        Q += MatrixXd::Identity(fcM.numX, fcM.numX) * config.regularisation;
+        chunkWorkList.push_back({id, fcP.begX, fcP.numX, fcM.begX, fcM.numX});
+    }
 
-        solveSystem(fcM.numX, fcP.numX, Q.data(), FP_.data());
+    bool parallelChunks = chunkWorkList.size() > 1;
+    BlasThreading::ScopedOpenBlasThreadLimit openblasThreadLimit(parallelChunks ? 1 : 0);
+#ifdef ENABLE_PARALLELISATION
+#pragma omp parallel for schedule(dynamic) if (parallelChunks)
+#endif
+    for (int c = 0; c < (int)chunkWorkList.size(); c++)
+    {
+        auto& work = chunkWorkList[c];
 
-        auto deltaX_   = deltaX.segment(fcP.begX, fcP.numX);
-        auto smoothedX = smoothedKF.x.segment(fcM.begX, fcM.numX);
-        auto xMinus    = kalmanMinus.x.segment(fcM.begX, fcM.numX);
-        auto deltaP_   = deltaP.block(fcP.begX, fcP.begX, fcP.numX, fcP.numX);
-        auto smoothedP = smoothedKF.P.block(fcM.begX, fcM.begX, fcM.numX, fcM.numX);
-        auto minuxP    = kalmanMinus.P.block(fcM.begX, fcM.begX, fcM.numX, fcM.numX);
+        int n    = work.minusNumX;
+        int neqs = work.plusNumX;
 
-        VectorXd xChanged = smoothedX - xMinus;
+        // Copy Q block and add regularization (needed for in-place solving)
+        MatrixXd Q = kalmanMinus.P.block(work.minusBegX, work.minusBegX, n, n);
+        Q += MatrixXd::Identity(n, n) * config.regularisation;
 
-        // Use CBLAS for matrix-vector multiplication: deltaX_ = FP_^T * xChanged
+        // Copy FP block for solving (will be overwritten by solution)
+        MatrixXd FP_solved = FP.block(work.minusBegX, work.plusBegX, n, neqs);
+        solveSystem(n, neqs, Q.data(), FP_solved.data());
+
+        // Get pointers to blocks for direct LAPACK operations
+        double* pDeltaX    = deltaX.data() + work.plusBegX;
+        double* pSmoothedX = smoothedKF.x.data() + work.minusBegX;
+        double* pXMinus    = kalmanMinus.x.data() + work.minusBegX;
+        double* pSmoothedP =
+            smoothedKF.P.data() + work.minusBegX * smoothedKF.P.rows() + work.minusBegX;
+        double* pMinusP =
+            kalmanMinus.P.data() + work.minusBegX * kalmanMinus.P.rows() + work.minusBegX;
+        double* pDeltaP = deltaP.data() + work.plusBegX * deltaP.rows() + work.plusBegX;
+
+        int ldSmoothedP = smoothedKF.P.rows();
+        int ldMinusP    = kalmanMinus.P.rows();
+        int ldDeltaP    = deltaP.rows();
+
+        // Compute xChanged = smoothedX - xMinus
+        VectorXd xChanged(n);
+        for (int i = 0; i < n; ++i)
+        {
+            xChanged[i] = pSmoothedX[i] - pXMinus[i];
+        }
+
+        // deltaX += FP_solved^T * xChanged
+        // Using dgemv: y = alpha*A^T*x + beta*y
         LapackWrapper::dgemv(
             LapackWrapper::COL_MAJOR,
             LapackWrapper::CblasTrans,
-            n,
-            neqs,
-            1.0,
-            FP_.data(),
-            n,
-            xChanged.data(),
-            1,
-            0.0,
-            deltaX_.data(),
-            1
+            n,                 // rows of FP_solved
+            neqs,              // cols of FP_solved
+            1.0,               // alpha
+            FP_solved.data(),  // matrix A
+            n,                 // leading dimension of A
+            xChanged.data(),   // vector x
+            1,                 // stride of x
+            0.0,               // beta (overwrite, not accumulate)
+            pDeltaX,           // vector y
+            1                  // stride of y
         );
 
-        MatrixXd dP   = smoothedP - minuxP;
-        MatrixXd temp = MatrixXd::Zero(neqs, n);
+        MatrixXd temp(neqs, n);
 
-        // Use CBLAS for matrix-matrix multiplication: temp = FP_^T * dP
+        // Compute: temp = FP_solved^T * (smoothedP - minusP)
+        // Note: Could use dsymm since P matrices are symmetric, but we need the transpose
+        // operation FP_solved^T which dsymm doesn't directly support, so dgemm is clearer
+
+        // Step 1: temp = FP_solved^T * smoothedP
         LapackWrapper::dgemm(
             LapackWrapper::COL_MAJOR,
-            LapackWrapper::CblasTrans,
-            LapackWrapper::CblasNoTrans,
-            neqs,
-            n,
-            n,
-            1.0,
-            FP_.data(),
-            n,
-            dP.data(),
-            n,
-            0.0,
-            temp.data(),
-            neqs
+            LapackWrapper::CblasTrans,    // transpose FP_solved
+            LapackWrapper::CblasNoTrans,  // don't transpose smoothedP
+            neqs,                         // rows of result
+            n,                            // cols of result
+            n,                            // inner dimension
+            1.0,                          // alpha
+            FP_solved.data(),             // A
+            n,                            // leading dim of A
+            pSmoothedP,                   // B (smoothed P block)
+            ldSmoothedP,                  // leading dim of B
+            0.0,                          // beta
+            temp.data(),                  // C
+            neqs                          // leading dim of C
         );
 
-        // Use CBLAS for matrix-matrix multiplication: deltaP_ = temp * FP_
-        // NOTE: deltaP_ is a block reference, so leading dimension is deltaP.rows()
+        // Step 2: temp -= FP_solved^T * minusP
         LapackWrapper::dgemm(
             LapackWrapper::COL_MAJOR,
-            LapackWrapper::CblasNoTrans,
-            LapackWrapper::CblasNoTrans,
-            neqs,
-            neqs,
-            n,
-            1.0,
-            temp.data(),
-            neqs,
-            FP_.data(),
-            n,
-            0.0,
-            deltaP_.data(),
-            deltaP.rows()  // Parent matrix row count, not block size
+            LapackWrapper::CblasTrans,    // transpose FP_solved
+            LapackWrapper::CblasNoTrans,  // don't transpose minusP
+            neqs,                         // rows of result
+            n,                            // cols of result
+            n,                            // inner dimension
+            -1.0,                         // alpha (subtract)
+            FP_solved.data(),             // A
+            n,                            // leading dim of A
+            pMinusP,                      // B (minus P block)
+            ldMinusP,                     // leading dim of B
+            1.0,                          // beta (accumulate)
+            temp.data(),                  // C
+            neqs                          // leading dim of C
+        );
+
+        // Final step: deltaP += temp * FP_solved
+        LapackWrapper::dgemm(
+            LapackWrapper::COL_MAJOR,
+            LapackWrapper::CblasNoTrans,  // don't transpose temp
+            LapackWrapper::CblasNoTrans,  // don't transpose FP_solved
+            neqs,                         // rows of result
+            neqs,                         // cols of result
+            n,                            // inner dimension
+            1.0,                          // alpha
+            temp.data(),                  // A
+            neqs,                         // leading dim of A
+            FP_solved.data(),             // B
+            n,                            // leading dim of B
+            0.0,                          // beta (overwrite)
+            pDeltaP,                      // C (deltaP block)
+            ldDeltaP                      // leading dim of parent matrix
         );
     }
 
     smoothedKF.dx = deltaX;
-    smoothedKF.x  = deltaX + kalmanPlus.x;
-    smoothedKF.P  = deltaP + kalmanPlus.P;
+
+    // Use BLAS for vector/matrix additions for better performance
+    smoothedKF.x = kalmanPlus.x;
+    LapackWrapper::daxpy(deltaX.size(), 1.0, deltaX.data(), 1, smoothedKF.x.data(), 1);
+
+    smoothedKF.P  = kalmanPlus.P;
+    int totalSize = kalmanPlus.P.rows() * kalmanPlus.P.cols();
+    LapackWrapper::daxpy(totalSize, 1.0, deltaP.data(), 1, smoothedKF.P.data(), 1);
 
     if (measurements.H.rows())
         if (measurements.H.cols() == deltaX.rows())
@@ -1045,10 +1116,10 @@ void rtsSmoothing(
             std::fstream inputStream(inputFile, std::ifstream::binary | std::ifstream::in);
 
             inputStream.seekg(0, inputStream.end);
-            long int lengthPos  = inputStream.tellg();
-            long int currentPos = reader.getCurrentPosition();
+            std::streamoff lengthPos  = inputStream.tellg();
+            std::streamoff currentPos = reader.getCurrentPosition();
 
-            vector<char> fileContents(lengthPos - currentPos);
+            vector<char> fileContents(static_cast<size_t>(lengthPos - currentPos));
 
             inputStream.seekg(currentPos, inputStream.beg);
 

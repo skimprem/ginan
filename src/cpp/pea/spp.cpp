@@ -27,6 +27,119 @@ using std::ostringstream;
 
 Architecture SPP__() {}
 
+struct smoothControl
+{
+    GTime  lastUpdate;
+    int    numMea    = 0;
+    double ambEst    = 0;
+    double ambVar    = -1;
+    double estSmooth = 0;
+    double varSmooth = -1;
+};
+map<SatSys, map<string, smoothControl>> smoothedMeasMap;
+
+enum class SppFailureReason
+{
+    NONE,
+    INSUFFICIENT_MEASUREMENTS,
+};
+
+/** Carrier-smoothing of code pseudoranges
+ * Ref: https://gssc.esa.int/navipedia/index.php/Carrier-smoothing_of_code_pseudoranges (eq (2))
+ */
+static int sppSmoothingWindowSamples()
+{
+    if (acsConfig.sppOpts.smooth_window <= 0)
+    {
+        return acsConfig.sppOpts.smooth_window;
+    }
+
+    if (acsConfig.epoch_interval <= 0)
+    {
+        return acsConfig.sppOpts.smooth_window;
+    }
+
+    return std::max(1, (int) ceil(acsConfig.sppOpts.smooth_window / acsConfig.epoch_interval));
+}
+
+bool smoothedPsudo(
+    Trace&  trace,
+    GObs&   obs,  ///< Observation to calculate pseudorange for
+    double& meaP,
+    double  meaL,
+    double& varP,
+    double  varL,
+    bool    update,
+    bool    LLI,
+    string* failReason_ptr = nullptr
+)
+{
+    if (varP < 0 || varL < 0)
+    {
+        if (failReason_ptr)
+        {
+            *failReason_ptr = "invalid smoothing variance: code_var=" + std::to_string(varP)
+                            + ", phase_var=" + std::to_string(varL);
+        }
+
+        return false;
+    }
+
+    int smoothWindowSamples = sppSmoothingWindowSamples();
+
+    auto& smCtrl = smoothedMeasMap[obs.Sat][obs.mount];
+    if (update)
+    {
+        bool slip = LLI;
+        if ((obs.time - smCtrl.lastUpdate).to_double() > acsConfig.sppOpts.smooth_outage)
+            slip = true;
+        if (smCtrl.ambVar < 0)
+            slip = true;
+        if (smCtrl.numMea <= 0)
+            slip = true;
+
+        double ambMea = meaP - meaL;
+        if (fabs(ambMea - smCtrl.ambEst) > 4 * sqrt(smCtrl.ambVar + varP + varL))
+            slip = true;  // Try replacing this with a outputs from preprocessor
+
+        smCtrl.lastUpdate = obs.time;
+        if (slip)
+        {
+            smCtrl.numMea = 0;
+            smCtrl.ambEst = 0;
+            smCtrl.ambVar = 0;
+        }
+
+        smCtrl.numMea++;
+        if (smCtrl.numMea > smoothWindowSamples)
+            smCtrl.numMea = smoothWindowSamples;
+        double fact = 1.0 / smCtrl.numMea;
+
+        smCtrl.ambEst += fact * (ambMea - smCtrl.ambEst);
+        smCtrl.ambVar = SQR(fact) * (varP + varL) + SQR(1 - fact) * smCtrl.ambVar;
+
+        smCtrl.estSmooth = smCtrl.ambEst + meaL;
+        smCtrl.varSmooth = (1 - 2 * fact) * varL + smCtrl.ambVar;
+    }
+
+    if (acsConfig.sppOpts.use_smooth_only && (smCtrl.numMea < smoothWindowSamples))
+    {
+        if (failReason_ptr)
+        {
+            *failReason_ptr = "smoothing not ready: samples=" + std::to_string(smCtrl.numMea)
+                            + "/" + std::to_string(smoothWindowSamples)
+                            + ", window_sec=" + std::to_string(acsConfig.sppOpts.smooth_window)
+                            + ", interval_sec=" + std::to_string(acsConfig.epoch_interval);
+        }
+
+        return false;
+    }
+
+    varP = smCtrl.varSmooth;
+    meaP = smCtrl.estSmooth;
+    return true;
+}
+
 /** Calculate pseudorange and code bias correction
  */
 bool prange(
@@ -40,9 +153,18 @@ bool prange(
     double&     bias,           ///< Bias value output
     double&     biasVar,        ///< Bias variance output
     KFState*    kfState_ptr,    ///< Optional kfstate to retrieve biases from
-    bool        smooth = false  ///< Update smoothing filter
+    bool        smooth = false, ///< Update smoothing filter
+    string*     failReason_ptr = nullptr
 )
 {
+    auto setFailReason = [&](const string& reason)
+    {
+        if (failReason_ptr)
+        {
+            *failReason_ptr = reason;
+        }
+    };
+
     ft_A    = NONE;
     ft_B    = NONE;
     range   = 0;
@@ -53,6 +175,8 @@ bool prange(
     E_Sys sys = obs.Sat.sys;
     if (sys == E_Sys::NONE)
     {
+        setFailReason("satellite system is NONE");
+
         return false;
     }
 
@@ -61,6 +185,8 @@ bool prange(
     E_FType f_3;
     if (!satFreqs(sys, f_1, f_2, f_3))
     {
+        setFailReason("no configured frequencies for system " + enum_to_string(sys));
+
         return false;
     }
 
@@ -74,6 +200,25 @@ bool prange(
     {
         ftList.push_back(f_3);
     }
+
+    auto freqListString = [](const list<E_FType>& freqs)
+    {
+        ostringstream stream;
+        bool first = true;
+
+        for (auto& freq : freqs)
+        {
+            if (first == false)
+            {
+                stream << "/";
+            }
+
+            stream << enum_to_string(freq);
+            first = false;
+        }
+
+        return stream.str();
+    };
 
     SatNav& satNav = *obs.satNav_ptr;
     auto&   lam    = satNav.lamMap;
@@ -131,10 +276,13 @@ bool prange(
     double var_A     = 0;
     double bias_A    = 0;
     double varBias_A = 0;
+    string primaryFreqs = freqListString(ftList);
     getPrange(ft_A, P_A, var_A, bias_A, varBias_A);
 
     if (P_A == 0)  // No pseudorange available
     {
+        setFailReason("no primary code pseudorange available: candidate_freqs=" + primaryFreqs);
+
         return false;
     }
 
@@ -143,16 +291,29 @@ bool prange(
     bias    = bias_A;
     biasVar = varBias_A;
 
-    if (ionoMode == E_IonoMode::IONO_FREE_LINEAR_COMBO)
+    bool   dualFreq = (ionoMode == E_IonoMode::IONO_FREE_LINEAR_COMBO) ||
+                      (ionoMode == E_IonoMode::SBAS && acsConfig.sbsInOpts.freq == 5);
+    double c1       = 1;
+    double c2       = 0;
+
+    if (dualFreq)
     {
         double P_B       = 0;
         double var_B     = 0;
         double bias_B    = 0;
         double varBias_B = 0;
+        string secondaryFreqs = freqListString(ftList);
         getPrange(ft_B, P_B, var_B, bias_B, varBias_B);
 
         if (P_B == 0 || ft_B == NONE)
         {
+            if (ionoMode == E_IonoMode::SBAS)
+            {
+                setFailReason("no secondary code pseudorange available for DFMC SBAS: candidate_freqs=" + secondaryFreqs);
+
+                return false;
+            }
+
             BOOST_LOG_TRIVIAL(warning)
                 << "Code measurement not available on secondary frequency for " << obs.Sat.id()
                 << " at " << obs.mount << ", falling back to single-frequency";
@@ -162,53 +323,59 @@ bool prange(
         else
         {
             // Iono-free combination
-            double c1 = SQR(lam[ft_B]) / (SQR(lam[ft_B]) - SQR(lam[ft_A]));
-            double c2 = 1 - c1;
+            c1 = SQR(lam[ft_B]) / (SQR(lam[ft_B]) - SQR(lam[ft_A]));
+            c2 = 1 - c1;
 
-            range = c1 * P_A + c2 * P_B;
-            bias  = c1 * bias_A + c2 * bias_B;
-
+            range   = c1 * P_A + c2 * P_B;
+            bias    = c1 * bias_A + c2 * bias_B;
             measVar = SQR(c1) * var_A + SQR(c2) * var_B;
-            biasVar = abs(SQR(c1) * varBias_A - SQR(c2) * varBias_B);  // Eugene: bias_A and
-            // bias_B are expected to be fully correlated?
+            biasVar = SQR(c1) * varBias_A + SQR(c2) * varBias_B;
         }
     }
 
-    if (acsConfig.sbsInOpts.smth_win > 0)
+    if (acsConfig.sppOpts.smooth_window > 0)
     {
-        double LC   = obs.sigs[ft_A].L * lam[ft_A];
-        double varL = obs.sigs[ft_A].phasVar;
-        if (LC == 0)
-            return false;
-
-        if (ionoMode == E_IonoMode::IONO_FREE_LINEAR_COMBO)
+        double meaL = obs.sigs[ft_A].L * lam[ft_A];
+        if (meaL == 0 && acsConfig.sppOpts.use_smooth_only)
         {
-            double L2 = obs.sigs[ft_B].L * lam[ft_B];
-            if (L2 == 0)
-                return false;
+            setFailReason("no primary carrier phase available for required smoothing: freq=" + enum_to_string(ft_A)
+                        + ", code=" + enum_to_string(obs.sigs[ft_A].code));
 
-            double c1 = SQR(lam[ft_B]) / (SQR(lam[ft_B]) - SQR(lam[ft_A]));
-            double c2 = 1 - c1;
-            LC        = c1 * LC + c2 * L2;
-            varL      = c1 * c1 * varL + c2 * c2 * obs.sigs[ft_B].phasVar;
+            return false;
+        }
+        double varL = obs.sigs[ft_A].phasVar;
+        bool   lli  = obs.sigs[ft_A].LLI;
+
+        if (dualFreq)
+        {
+            double meaL_B = obs.sigs[ft_B].L * lam[ft_B];
+            if (meaL_B == 0)
+            {
+                if (ionoMode == E_IonoMode::SBAS)
+                {
+                    setFailReason("no secondary carrier phase available for DFMC SBAS smoothing: freq=" + enum_to_string(ft_B)
+                                + ", code=" + enum_to_string(obs.sigs[ft_B].code));
+
+                    return false;
+                }
+            }
+            else
+            {
+                double varL_B = obs.sigs[ft_B].phasVar;
+                meaL          = c1 * meaL + c2 * meaL_B;
+                varL          = SQR(c1) * varL + SQR(c2) * varL_B;
+                lli           = obs.sigs[ft_A].LLI || obs.sigs[ft_B].LLI;
+            }
         }
 
-        range = sbasSmoothedPsudo(
-            trace,
-            obs.time,
-            obs.Sat,
-            obs.mount,
-            range,
-            LC,
-            measVar,
-            varL,
-            measVar,
-            smooth
-        );
-        biasVar = 0;
+        string smoothingFailReason;
+        if (!smoothedPsudo(trace, obs, range, meaL, measVar, varL, smooth, lli, &smoothingFailReason) &&
+            acsConfig.sppOpts.use_smooth_only)
+        {
+            setFailReason(smoothingFailReason.empty() ? "carrier smoothing rejected measurement" : smoothingFailReason);
 
-        if (measVar < 0)
             return false;
+        }
     }
 
     return true;
@@ -402,15 +569,21 @@ void removeUnmeasuredStates(
 /** Estimate receiver position and clock biases using pseudorange measurements
  */
 E_Solution estpos(
-    Trace&    trace,                  ///< Trace file to output to
-    ObsList&  obsList,                ///< List of observations for this epoch
-    Solution& sol,                    ///< Solution object containing initial conditions and results
-    string    id,                     ///< Id of receiver
-    KFState*  kfState_ptr = nullptr,  ///< Optional kfstate pointer to retrieve ppp values from
-    string    description = "SPP",    ///< Description to prepend to clarify outputs
-    bool      inRaim      = false     ///< Is in RAIM
+    Trace&            trace,                         ///< Trace file to output to
+    ObsList&          obsList,                       ///< List of observations for this epoch
+    Solution&         sol,                           ///< Solution object containing initial conditions and results
+    string            id,                            ///< Id of receiver
+    KFState*          kfState_ptr       = nullptr,   ///< Optional kfstate pointer to retrieve ppp values from
+    string            description       = "SPP",     ///< Description to prepend to clarify outputs
+    bool              inRaim            = false,     ///< Is in RAIM
+    SppFailureReason* failureReason_ptr = nullptr    ///< Optional reason for unrecoverable SPP failures
 )
 {
+    if (failureReason_ptr)
+    {
+        *failureReason_ptr = SppFailureReason::NONE;
+    }
+
     if (obsList.empty())
     {
         return E_Solution::NONE;
@@ -536,6 +709,7 @@ E_Solution estpos(
             double     varMeas;
             double     bias;
             double     varBias;
+            string     prangeFailReason;
             bool       smooth = (inRaim == false && iter == 0);
             bool       pass   = prange(
                 trace,
@@ -548,13 +722,18 @@ E_Solution estpos(
                 bias,
                 varBias,
                 kfState_ptr,
-                smooth
+                smooth,
+                &prangeFailReason
             );
             if (pass == false)
             {
                 obs.failurePrange = true;
 
                 traceBuffer << " ... Pseudorange fail";
+                if (prangeFailReason.empty() == false)
+                {
+                    traceBuffer << ": " << prangeFailReason;
+                }
                 tracepdeex(2, trace, "%s", traceBuffer.str());
 
                 continue;
@@ -599,6 +778,12 @@ E_Solution estpos(
 
             tracepdeex(2, trace, ", el=%.2f", elevation);
 
+            if (acsConfig.sbsOpts.use_sbas_rec_var)
+            {
+                varMeas = SQR(0.36) + SQR(0.13 + 0.53 * exp(-elevation / 10));
+                varBias = 0;
+            }
+
             // Sat clock
             if (obs.ephClkValid == false)
             {
@@ -611,6 +796,22 @@ E_Solution estpos(
 
             double dtSat     = -obs.satClk * CLIGHT;
             double varSatClk = obs.satClkVar * SQR(CLIGHT);
+            auto&  satOpts   = acsConfig.getSatOpts(obs.Sat);
+            if (satOpts.posModel.sources[0] == E_Source::SBAS && !acsConfig.sbsInOpts.pvs_on_dfmc)
+            {
+                double sbasVar =
+                    checkSBASVar(trace, obs.time, obs.Sat, rRec, rSat, obs.satNav_ptr->currentSBAS);
+
+                if (sbasVar <= 0)
+                {
+                    tracepdeex(2, trace, " ... Sat clk fail (sbas)");
+                    continue;
+                }
+                bias      = 0;
+                varBias   = 0;
+                varSatPos = 0;
+                varSatClk = sbasVar;
+            }
 
             tracepdeex(2, trace, ", satClk=%.3f", dtSat);
 
@@ -642,10 +843,6 @@ E_Solution estpos(
                 dIono *= ionC;
                 varIono *= SQR(ionC);
             }
-
-            if (acsConfig.sbsInOpts.dfmc_uire)
-                varIono = SQR(0.018 + 40 / (261 + SQR(satStat.el * R2D)));
-
             tracepdeex(2, trace, ", dIono=%.5f", dIono);
 
             // Tropospheric correction
@@ -722,7 +919,7 @@ E_Solution estpos(
             codeMeas.obsKey.Sat     = obs.Sat;
             codeMeas.obsKey.str     = id;
             codeMeas.obsKey.num     = ft2 ? (static_cast<int>(obs.sigs[ft1].code) * 100 +
-                                         static_cast<int>(obs.sigs[ft2].code))
+                                             static_cast<int>(obs.sigs[ft2].code))
                                           : static_cast<int>(obs.sigs[ft1].code);
             codeMeas.obsKey.type    = KF::CODE_MEAS;
             codeMeas.obsKey.comment = "";
@@ -734,7 +931,7 @@ E_Solution estpos(
 
             kfMeasEntryList.push_back(codeMeas);
 
-            obs.sppValid = true;  // todo aaron, this is messy, lots of excludes dont work if spp
+            obs.sppValid = true;  // todo? this is messy, lots of excludes dont work if spp
                                   // not run, harmonise the spp/ppp exclusion methods.
             obs.sppCodeResidual = res;
         }
@@ -770,6 +967,10 @@ E_Solution estpos(
             printFailures(id, obsList);
 
             tracepdeex(3, trace, "\nLack of valid measurements, END OF SPP LSQ");
+            if (failureReason_ptr)
+            {
+                *failureReason_ptr = SppFailureReason::INSUFFICIENT_MEASUREMENTS;
+            }
 
             return E_Solution::FAILED;
         }
@@ -818,7 +1019,7 @@ E_Solution estpos(
                 kfState.outputStates(trace, suffix);
             }
 
-            if (kfState.chiSquareTest.enable)  // todo Eugene: use meas chi-square test in algebra
+            if (kfState.chiSquareTest.enable)  // todo? use meas chi-square test in algebra
             {
                 double a =
                     sqrt(kfState.P(1, 1) + kfState.P(2, 2) + kfState.P(3, 3)) * kfState.chi2PerDof;
@@ -1170,8 +1371,17 @@ void spp(
     );
 
     // Estimate receiver position with pseudorange
-    sol.status = estpos(trace, obsList, sol, id, kfState_ptr, (string) "SPP/" + id);  // todo aaron,
-                                                                                      // remote too?
+    SppFailureReason failureReason = SppFailureReason::NONE;
+    sol.status = estpos(
+        trace,
+        obsList,
+        sol,
+        id,
+        kfState_ptr,
+        (string) "SPP/" + id,
+        false,
+        &failureReason
+    );  // todo? // remote too?
 
     auto& sppState = sol.sppState;
 
@@ -1181,31 +1391,43 @@ void spp(
         if (acsConfig.sppOpts.raim.enable &&
             sol.status != E_Solution::NONE)  // Meaningless to perform RAIM for NONE solution
         {
-            int numMeas = 0;
-            for (auto& obs : only<GObs>(obsList))
+            if (failureReason == SppFailureReason::INSUFFICIENT_MEASUREMENTS)
             {
-                obs.excludeOutlier =
-                    false;  // Clear outlier flags from SPP and let RAIM do the exclusion
-
-                if (obs.exclude)
+                tracepdeex(
+                    3,
+                    trace,
+                    "\n%s\tSkipping RAIM: lack of valid measurements cannot be recovered by excluding observations",
+                    tsync.to_string().c_str()
+                );
+            }
+            else
+            {
+                int numMeas = 0;
+                for (auto& obs : only<GObs>(obsList))
                 {
-                    continue;
+                    obs.excludeOutlier =
+                        false;  // Clear outlier flags from SPP and let RAIM do the exclusion
+
+                    if (obs.exclude)
+                    {
+                        continue;
+                    }
+
+                    numMeas++;
                 }
 
-                numMeas++;
-            }
+                sppState.dof        = numMeas - (sppState.x.rows() - 1);
+                sppState.chi2PerDof = INFINITY;
 
-            sppState.dof        = numMeas - (sppState.x.rows() - 1);
-            sppState.chi2PerDof = INFINITY;
+                bool pass = raim(trace, obsList, sol, id, kfState_ptr);
 
-            bool pass = raim(trace, obsList, sol, id, kfState_ptr);
-
-            if (pass && traceLevel >= 4)
-            {
-                sppState.outputStates(
-                    trace,
-                    "/SPP/" + id
-                );  // Only output states again when RAIM is successful
+                if (pass && traceLevel >= 4)
+                {
+                    sppState.outputStates(
+                        trace,
+                        "/SPP/" + id
+                    );  // Only output states again when RAIM is successful
+                }
             }
         }
     }

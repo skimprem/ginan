@@ -11,7 +11,9 @@
       "hidden": true,
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "VCPKG_MANIFEST_MODE": "ON",
+        "VCPKG_MANIFEST_DIR": "${sourceDir}/.."
       }
     },
     {
@@ -25,7 +27,7 @@
       },
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "x64-linux",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed"
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed/linux"
       }
     },
     {
@@ -38,7 +40,8 @@
         "rhs": "Windows"
       },
       "cacheVariables": {
-        "VCPKG_TARGET_TRIPLET": "x64-windows"
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed/windows"
       }
     },
     {
@@ -49,6 +52,9 @@
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "BLA_VENDOR": "Apple"
       }
     },
     {
@@ -59,7 +65,7 @@
         "VCPKG_TARGET_TRIPLET": "arm64-osx",
         "CMAKE_OSX_ARCHITECTURES": "arm64",
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain/clang_mac_arm64.cmake",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed"
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed/macos-arm64"
       }
     },
     {
@@ -70,7 +76,7 @@
         "VCPKG_TARGET_TRIPLET": "x64-osx",
         "CMAKE_OSX_ARCHITECTURES": "x86_64",
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain/clang_mac_x64.cmake",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed"
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed/macos-x64"
       }
     },
     {
@@ -92,7 +98,8 @@
         "CMAKE_FIND_ROOT_PATH_MODE_INCLUDE": "ONLY",
         "VCPKG_TARGET_TRIPLET": "x64-mingw-static",
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain/mingw64.cmake",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed/mingw",
+        "OPENSSL_ROOT_DIR": "${sourceDir}/../vcpkg_installed/mingw/x64-mingw-static",
         "ENABLE_MONGODB": "OFF"
       }
     },
@@ -110,7 +117,7 @@
         "CMAKE_CXX_COMPILER": "g++",
         "VCPKG_TARGET_TRIPLET": "x64-mingw-static",
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain/mingw64.cmake",
-        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/../vcpkg_installed/mingw",
         "ENABLE_MONGODB": "OFF"
       }
     },
@@ -132,6 +139,16 @@
       "inherits": ["linux-base"],
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "relwithdebinfo",
+      "displayName": "RelWithDebInfo",
+      "description": "Optimized build with debug symbols for profiling",
+      "binaryDir": "${sourceDir}/build/linux-RelWithDebInfo",
+      "inherits": ["linux-base"],
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
     },
     {
@@ -249,6 +266,11 @@
       "displayName": "Debug Build"
     },
     {
+      "name": "relwithdebinfo",
+      "configurePreset": "relwithdebinfo",
+      "displayName": "RelWithDebInfo Build"
+    },
+    {
       "name": "windows-release",
       "configurePreset": "windows-release",
       "displayName": "Windows Release Build"
@@ -297,6 +319,24 @@
       "name": "windows-mingw-debug",
       "configurePreset": "windows-mingw-debug",
       "displayName": "Windows MinGW Native Debug Build"
+    },
+    {
+      "name": "make_otl_blq",
+      "configurePreset": "release",
+      "displayName": "Build make_otl_blq (NetCDF ocean tide loading)",
+      "targets": ["make_otl_blq"]
+    },
+    {
+      "name": "interpolate_loading",
+      "configurePreset": "release",
+      "displayName": "Build interpolate_loading (NetCDF loading interpolation)",
+      "targets": ["interpolate_loading"]
+    },
+    {
+      "name": "netcdf-programs",
+      "configurePreset": "release",
+      "displayName": "Build all NetCDF programs",
+      "targets": ["make_otl_blq", "interpolate_loading"]
     }
   ]
 }

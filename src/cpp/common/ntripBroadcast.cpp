@@ -252,15 +252,11 @@ void NtripUploader::messageTimeoutHandler(const boost::system::error_code& err)
                 auto buffer = encodeSsrOrbClk(ssrOutMap, messCode);
                 bool write  = encodeWriteMessageToBuffer(buffer);
 
-                if (traceLevel > 5)
+                if (write == false)
                 {
-                    // 					debugSSR(t0, targetTime, sys, ssrOutMap);
-
-                    if (write == false)
-                    {
-                        std::cout << "RtcmMessageType::" << enum_to_string(messCode)
-                                  << " was not written" << "\n";
-                    }
+                    std::cout << "RtcmMessageType::" << enum_to_string(messCode)
+                              << " was not written"
+                              << "\n";
                 }
 
                 break;
@@ -538,7 +534,7 @@ void NtripUploader::messageTimeoutHandler(const boost::system::error_code& err)
                         case CompactSSRSubtype::CMB:
                         case CompactSSRSubtype::URA:
                             for (auto [sys, proc] :
-                                 acsConfig.process_sys)  // todo aaron, this is all just copying
+                                 acsConfig.process_sys)  // todo? this is all just copying
                                                          // stuff from one map to another
                                 if (proc)
                                 {

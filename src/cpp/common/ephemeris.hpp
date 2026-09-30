@@ -63,29 +63,28 @@ struct Eph : BrdcEph, KeplerEph
     int          sva;                        ///< SV accuracy (URA index)
     E_Svh        svh;                        ///< SV health
     int   week;  ///< GPS/QZS: gps week, GAL:gps week (i.e. galileo week + 1024), BDS: beidou week
-    int   code = 0;                    ///< GPS/QZS: code on L2, GAL: data source
-    int   flag = 0;                    ///< GPS L2 P data flag
-    int   howTow;                      ///< Hand over word time
-    GTime toc;                         ///< time of clock
-    GTime toe;                         ///< time of ephemeris
-    GTime ttm;                         ///< transmission time
+    int   code = 0;                      ///< GPS/QZS: code on L2, GAL: data source
+    int   flag = 0;                      ///< GPS L2 P data flag
+    int   howTow;                        ///< Hand over word time
+    GTime toc;                           ///< time of clock
+    GTime toe;                           ///< time of ephemeris
+    GTime ttm;                           ///< transmission time
 
-    double toes;                       ///< TOE (s) in week
-    double fit;                        ///< fit interval (h)
-    double f0;                         ///< SV clock parameter (af0)
-    double f1;                         ///< SV clock parameter (af1)
-    double f2;                         ///< SV clock parameter (af2)
-    double tgd[4] = {};                ///< group delay parameters
-                                       ///< GPS/QZS:tgd[0]=TGD
-                                       ///< GAL    :tgd[0]=BGD E5a/E1,tgd[1]=BGD E5b/E1
-                                       ///< BDS    :tgd[0]=BGD1,tgd[1]=BGD2
+    double toes;                         ///< TOE (s) in week
+    double fit;                          ///< fit interval (h)
+    double f0;                           ///< SV clock parameter (af0)
+    double f1;                           ///< SV clock parameter (af1)
+    double f2;                           ///< SV clock parameter (af2)
+    double tgd[4] = {};                  ///< group delay parameters
+                                         ///< GPS/QZS:tgd[0]=TGD
+                                         ///< GAL    :tgd[0]=BGD E5a/E1,tgd[1]=BGD E5b/E1
+                                         ///< BDS    :tgd[0]=BGD1,tgd[1]=BGD2
 
-    E_SatType orb  = E_SatType::NONE;  ///< BDS sat/orbit type
-    GTime     top  = {};               ///< time of prediction
-    double    tops = 0;                ///< t_op (s) in week
-    double    ura[4] =
-        {};  ///< user range accuracy or GAL SISA
-             ///< GPS/QZS CNVX: ura[0]=URAI_NED0, ura[1]=URAI_NED1, ura[2]=URAI_NED2, ura[3]=URAI_ED
+    E_SatType orb    = E_SatType::NONE;  ///< BDS sat/orbit type
+    GTime     top    = {};               ///< time of prediction
+    double    tops   = 0;                ///< t_op (s) in week
+    double    ura[4] = {};               ///< user range accuracy or GAL SISA
+    ///< GPS/QZS CNVX: ura[0]=URAI_NED0, ura[1]=URAI_NED1, ura[2]=URAI_NED2, ura[3]=URAI_ED
     double isc[6] = {};  ///< inter-signal corrections
                          ///< GPS/QZS CNAV: isc[0]=ISC_L1CA, isc[1]=ISC_L2C, isc[2]=ISC_L5I5,
                          ///< isc[3]=ISC_L5Q5 GPS/QZS CNV2: isc[0]=ISC_L1CA, isc[1]=ISC_L2C,
@@ -170,6 +169,7 @@ struct Geph : BrdcEph
     double       taun;                       ///< SV clock bias (s)
     double       gammaN;                     ///< SV relative freq bias
     double       dtaun;                      ///< delay between L1 and L2 (s)
+    GTime        ttm;                        // unused, for templating only
 
     // original messages from stream/rinex for debugging
     double tofs;      ///< TOF (s) within the current day
@@ -235,6 +235,7 @@ struct Seph : BrdcEph
     double       af1  = 0;                   ///< satellite clock-drift (s/s)
     int          iode = -1;                  // unused, for templating only
     GTime        toe;                        // unused, for templating only
+    GTime        ttm;                        // unused, for templating only
 
     double tofs;                             ///< TOF (s) within the week
 };
@@ -256,9 +257,8 @@ struct Ceph : KeplerEph
     GTime        top  = {};                  ///< time of prediction
     GTime        ttm  = {};                  ///< transmission time
 
-    double ura[4] =
-        {};  ///< user range accuracy
-             ///< GPS/QZS: ura[0]=URAI_NED0, ura[1]=URAI_NED1, ura[2]=URAI_NED2, ura[3]=URAI_ED
+    double ura[4] = {};                      ///< user range accuracy
+    ///< GPS/QZS: ura[0]=URAI_NED0, ura[1]=URAI_NED1, ura[2]=URAI_NED2, ura[3]=URAI_ED
     double isc[6] = {};  ///< inter-signal corrections
                          ///< GPS/QZS CNAV: isc[0]=ISC_L1CA, isc[1]=ISC_L2C, isc[2]=ISC_L5I5,
                          ///< isc[3]=ISC_L5Q5 GPS/QZS CNV2: isc[0]=ISC_L1CA, isc[1]=ISC_L2C,
@@ -491,5 +491,3 @@ bool satClkSSR(Trace& trace, GTime time, GTime teph, SatPos& satPos, Navigation&
 double relativity1(Vector3d& rSat, Vector3d& satVel);
 
 bool satPosSBAS(Trace& trace, GTime time, GTime teph, SatPos& satPos, Navigation& nav);
-
-bool satClkSBAS(Trace& trace, GTime time, GTime teph, SatPos& satPos, Navigation& nav);

@@ -1,0 +1,810 @@
+# Ginan-UI
+## User Manual
+### This guide is written to aid those using the Ginan-UI extension software.
+### Version: Release v4.1.2
+#### Written by: Sam Greenwood
+#### Last Updated: 16th June 2026
+
+## 1. Introduction
+
+Ginan-UI is a graphical user interface for the Ginan software developed by Geoscience Australia. It aims to lower the barrier of entry for users trying to use the Ginan software by simplifying the users interaction with the software away from a command-line interface. On top of this, it automatically fills the .YAML configuration based on a user-provided .RNX file, automatically downloads all static and dynamic products required for execution, and also executes Ginan and visualises its plot output visualisation in an HTML format.
+
+This tool is designed for both new users to the Ginan software who are not comfortable using Ginan in its command-line interface form, and experienced Ginan users who want to streamline their use process.
+
+## 2. System Requirements & Installation
+
+### 2.1 Minimum System Requirements
+
+- OS: Mac, Linux, Windows
+- CPU: 1 core, 2 threads
+- Storage: 4GB
+- Memory: 2GB
+- Internet connection
+
+### 2.2 Installation Guide
+
+**It is required** to have registered credentials to access the CDDIS Archives. This is necessary to automatically download the auxiliary products and data. Once registered, enter the credentials into the CDDIS Credentials pop-up that opens on first-time launch.
+
+If this does not open for you and the program instead opens to the main screen, check the top-right for a button that reads: "CDDIS Credentials".
+
+#### Installation From an Executable
+
+##### Windows
+
+1. Download the latest Windows release from [GitHub Releases](https://github.com/GeoscienceAustralia/ginan/releases)
+
+2. Extract the ZIP archive to your desired location
+
+3. Run `Ginan-UI.exe`
+
+**Windows Security Warning:** On first-time launch, Windows Defender SmartScreen may display a warning because the executable is not code-signed. This is expected behaviour for unsigned open-source software. To proceed:
+1. Click **"More info"**
+2. Click **"Run anyway"**
+
+Ginan-UI is safe to run - the complete source code is available in this repository for verification.
+
+##### MacOS
+
+1. Download the latest macOS release from [GitHub Releases](https://github.com/GeoscienceAustralia/ginan/releases)
+
+2. Extract the archive to your desired location
+
+3. Remove the file from macOS quarantine:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/ginan-ui
+```
+
+4. Run the startup script, which configures environment variables and launches Ginan-UI:
+
+```bash
+./run.sh
+```
+
+##### Linux
+
+1. Download the latest Linux release from [GitHub Releases](https://github.com/GeoscienceAustralia/ginan/releases)
+
+2. Extract the archive:
+
+```bash
+tar -xf ginan-ui-linux-x64.tar.gz
+cd ginan-ui
+```
+
+3. Make the executable runnable (if needed):
+
+```bash
+chmod +x ginan-ui
+```
+
+4. Run Ginan-UI:
+
+```bash
+./ginan-ui
+```
+
+**Note:** On some Linux distributions, you may need to install additional Qt dependencies. If you encounter missing library errors, refer to Section 7.1 (Troubleshooting).
+
+#### Installation from Source
+Follow the commands below, tested with Python 3.9+:
+
+```bash
+cd /path/to/ginan
+pip install -r scripts/GinanUI/requirements.txt
+python -m scripts.GinanUI.main
+```
+
+## 3. Getting Started (Quick Start)
+
+When you open Ginan-UI for the first time, you will be taken to the main dashboard interface. The workflow is straightforward and only requires a few inputs from the user before Ginan can begin processing.
+
+<p align="center"><i>Dashboard of Ginan-UI</i></p>
+
+![Dashboard of Ginan-UI](./images/ginan_ui_dashboard.jpg)
+
+To use Ginan-UI, you will require an account with NASA's CDDIS EarthData archives. Once you have created an account here, you can log in by clicking the "CDDIS Credentials" button in the top-right of Ginan-UI:
+
+<p align="center"><i>CDDIS Credentials button in the top-right</i></p>
+
+!["CDDIS Credentials" button highlighted](./images/cddis_credentials_button.jpg)
+
+Then, enter your CDDIS credentials and click "Save".
+
+<p align="center"><i>Type in your CDDIS login credentials here</i></p>
+
+![CDDIS Credentials screen displaying username and password fields](./images/cddis_credentials_screen.jpg)
+
+Next, click the "Observations" button in the top-left and select the RINEX observation data file you want to process. Afterward, click the adjacent "Output" button and choose an output location for where Ginan will store its results after processing.
+
+<p align="center"><i>Select your RINEX observation file and your output location</i></p>
+
+!["Observations" and "Output" buttons highlighted](./images/observations_output_buttons.jpg)
+
+Once your RINEX observation file is set, most of the UI fields should autofill based on extracted data from the RINEX file, however the user still needs to set the "Mode" parameter. This defines how much noise should be expected in the data (i.e. "Static" = stationary GNSS receiver, "Kinematic" = a moving car, "Dynamic" = a moving plane). Set this field now.
+
+More experienced users may recognise this parameter as the `estimation_parameters.receivers.global.pos.process_noise` config value. By default, "Static" = 0, "Kinematic" = 30, and "Dynamic" = 100.
+
+<p align="center"><i>Select a "Mode" to set the `process_noise`</i></p>
+
+!["Mode" dropdown showing the options: "Static", "Kinematic", and "Dynamic"](./images/mode_dropdown.jpg)
+
+Once everything is configured and all fields have been autofilled by Ginan-UI, simply click "Process" to start Ginanʼs PEA processing. Ginan-UI will begin downloading the required products from the CDDIS servers for Ginan to process, and then will execute Ginan automatically. Ginanʼs processing progress will be displayed in the accompanying "Console" tab next to the default "Workflow" tab.
+
+<p align="center"><i>Click "Process" when ready!</i></p>
+
+!["Process" button highlighted](./images/process_button.jpg)
+
+<p align="center"><i>Ginan-UI will automatically start downloading the necessary products</i></p>
+
+![Automatically began downloading dynamic products for PEA processing](./images/product_downloading.jpg)
+
+<p align="center"><i>Ginan's PEA tool will then begin processing using the selected configuration</i></p>
+
+![PEA processing within the "Console" tab](./images/pea_processing.jpg)
+
+When Ginan finishes processing, you can view the generated position plot within Ginan-UI, or alternatively open the generated HTML output to review the results by clicking "Open in Browser".
+
+<p align="center"><i>Once PEA finishes processing, Ginan-UI will plot the results</i></p>
+
+![Plot visualisation within Ginan-UI](./images/plot_visualisation.jpg)
+
+<p align="center"><i>Visualisation plot enlarged in the web-browser</i></p>
+
+![Plot visualisation opened in web-browser](./images/plot_visualisation_web.jpg)
+
+And that is it! Check out Section 6 for more in-depth tooling.
+
+## 4. User Interface Reference
+
+The Ginan-UI interface is divided into two main panels: the left panel for input configuration, and the right panel for monitoring, output, and visualisation. All panels are resizable by dragging the divider between them, allowing you to customise your workspace layout.
+
+### 4.1 Input Configuration (Left Panel)
+
+The left-hand panel contains all the configuration options required to set up Ginan to commence processing. These options are organised into four tabs: **General**, **Constellations**, **Output**, and **YAML**.
+
+#### 4.1.1 General Tab
+
+The General tab contains the primary configuration options for setting up your GNSS processing run.
+
+##### "Observations" Button
+
+- Opens a file picker to select your RINEX v2/v3/v4 observation file (optionally can be compressed).
+
+- Ginan-UI will automatically extract metadata from your provided RINEX file, including the time window, available constellations, and receiver and antenna type information. This metadata is then used to autopopulate the several fields below.
+
+##### "Output" Button
+
+- Opens a file picker to select where PEA will save its processing results (`.pos`, `.log`, HTML plots).
+
+- Remains disabled until a valid "Observations" file has been selected.
+
+##### Mode
+
+- **Critical parameter** that must be set by the user.
+
+- Defines expected receiver motion and sets the process noise parameter for position estimation:
+  - **Static** (0): Stationary GNSS receiver (e.g. reference station)
+  - **Kinematic** (30): Moving ground vehicle (e.g. a car)
+  - **Dynamic** (100): Fast-moving vehicle (e.g. an airplane)
+
+- Corresponds to the `estimation_parameters.receivers.global.pos.process_noise` YAML field
+
+##### Constellations
+
+- Drop-down showing GNSS systems detected from your RINEX file. Displays which constellations are available: GPS, GAL (Galileo), GLO (GLONASS), BDS (BeiDou), QZS (QZSS)
+
+##### Time Window
+
+- Displays the detected start and end epochs.
+
+- Useful is you only want to process a subset of your observation period
+
+##### Data Interval
+
+- Set the interval to downsample your observation data (i.e. process every 120 seconds, instead of 30 seconds).
+
+##### Receiver Type / Antenna Type
+
+- Used internally for antenna phase centre corrections
+
+##### Antenna Offset
+
+- View / edit ENU (East-North-Up) offset values. This allows manual adjustment if your antenna has a known offset position from its reference point.
+
+##### Apriori Position
+
+- View / edit the approximate ECEF (X, Y, Z) position of the receiver in metres, automatically extracted from the RINEX file header.
+
+- This is used by PEA as the initial position estimate for the PPP filter. If no apriori position is present in the RINEX file, this field will remain empty and PEA will use its own initialisation strategy.
+
+##### PPP Provider / Project / Series
+
+- Three drop-downs that filter available products based on the provided time window
+
+- **Provider:** Analysis centre or organisation (e.g. IGS, COD, GFZ, JPL)
+
+- **Series:** Solution type (e.g. Ultra-rapid, Rapid, Final)
+
+- **Project:** Product line within the provider (e.g. IGS_MGEX, CODE_MGEX)
+
+- Changing the provider will filter the available series and projects.
+
+- These fields are populated after a valid observation file has been loaded.
+
+#### 4.1.2 Constellations Tab
+
+The Constellations tab allows you to manage the observation code priorities for each enabled GNSS constellation on the "General" tab. Code priorities determine which signal types PEA will prefer when processing your data.
+
+##### How It Works
+
+When you select a PPP provider, series, and project in the "General" tab, Ginan-UI will automatically retrieve the supported code priorities from the corresponding `.BIA` (bias) product file. These are cross-referenced against the observation codes present in the provided RINEX observation file and the constellations available in the `.SP3` (orbit) product file.
+
+##### Constellation Panels
+
+Each constellation (GPS, GAL, GLO, BDS, QZS) has its own panel displaying the available observation codes. Only constellations that are enabled in the "General" tab's "Constellations" field will be shown and configurable.
+
+- Codes are listed in priority order from top to bottom.
+
+- You can reorder codes by dragging and dropping to change their priority.
+
+##### Automatic Validation
+
+Ginan-UI performs automatic validation to ensure compatibility between the provided RINEX observation data and the selected PPP products:
+
+- **RINEX vs SP3 verification:** The constellations in the RINEX file are verified against those available in the PPP provider's `.SP3` orbit file. If a constellation in your RINEX file is not supported by the PPP products, it will be displayed but coloured red and be strikethrough.
+
+- **Code priority detection:** The supported code priorities are automatically detected from the PPP provider's `.BIA` file, ensuring that only valid codes are configured.
+
+- **SINEX station validation:** Ginan-UI downloads the IGS CRD SINEX file for your observation date and validates the receiver metadata extracted from your RINEX file (marker name, receiver type, antenna type, antenna offset, and apriori position) against the IGS station database. Any discrepancies are reported in the Workflow log. This helps catch misconfigured or non-standard station metadata before processing begins.
+
+#### 4.1.3 Output Tab
+
+The Output tab allows you to specify which output files PEA should generate during processing.
+
+##### Output File Options
+
+- **POS** (Position file): Contains the computed position solutions. This is the primary output for most users and is enabled by default.
+
+- **GPX** (GPS Exchange Format): Generates a GPX file compatible with mapping software and GPS devices. Enabled by default.
+
+- **TRACE** (Trace file): Produces detailed debugging output from PEA processing. Disabled by default.
+
+- **SNX** (SINEX file): Generates a Solution Independent Exchange Format file containing station coordinates, velocities, and other geodetic parameters. Disabled by default.
+
+##### Visualisation Dependency
+
+The plot visualisation feature in the right panel depends on the output files being generated. If you disable the POS output, the corresponding position plots will not be available in the Visualisation section after processing completes.
+
+#### 4.1.4 YAML Config Tab
+
+The YAML Config tab provides controls for managing the YAML configuration file and accessing advanced editing tools.
+
+##### "Overwrite Config with UI Values" Toggle
+
+- Enabled by default. Controls whether Ginan-UI should automatically update the YAML configuration file with values from the user interface.
+
+- **When enabled:** Clicking the "Show Config" or "Process" buttons will write all UI-configured values to fields marked with `#AUTO` comments in the YAML file.
+
+- **When disabled:** Your manual edits to the YAML file are preserved. Ginan-UI will not overwrite any fields which allows for complete manual control over the configuration. This is useful when you want to make advanced changes to config parameters that are not exposed in the UI.
+
+- **Note:** Ocean and atmospheric loading BLQ file generation will still occur even when this toggle is disabled, as these are required for proper tide loading corrections.
+
+##### "Show Config" Button
+
+- Opens the generated `ppp_generated.yaml` file in your system's default text editor.
+
+- If "Overwrite Config with UI Values" is enabled, the file will be updated with current UI values before opening.
+
+- If disabled, the file will be opened as-is without any modifications, preserving your manual edits.
+
+- Allows advanced users to manually edit PEA configuration parameters that are not exposed in the UI.
+
+- See Section 6.1 for more details on manual config editing.
+
+##### "Reset Config" Button
+
+- Resets both the UI and the configuration file back to their default states.
+
+- The `ppp_generated.yaml` configuration file will be deleted and regenerated from the default template.
+
+- All UI fields will be cleared and returned to their initial placeholder values.
+
+- This is useful if you have made configuration changes you want to undo, or if you want to start fresh with a new RINEX file without lingering settings from a previous session.
+
+- A confirmation dialog will appear before the reset proceeds.
+
+##### "Edit Config in Inspector" Button
+
+- Opens the GinanYAMLInspector tool in an embedded browser window.
+
+- The inspector provides a graphical interface for editing the YAML configuration with more advanced options than the main Ginan-UI interface exposes.
+
+- **Auto-import:** The current `ppp_generated.yaml` configuration is automatically loaded into the inspector when opened.
+
+- **Save integration:** When you click "Save file" in the inspector, the changes are automatically merged back into `ppp_generated.yaml`. Keys that the inspector doesn't know about are preserved which ensures manual edits to unsupported fields will remain intact.
+
+- **Inspector generation:** If the GinanYAMLInspector HTML file does not exist, Ginan-UI will automatically attempt to generate it using the PEA executable (`pea -Y 4`).
+
+- This feature is particularly useful for bulk configuration changes or when working with configuration options that require the full flexibility of the inspector's interface.
+
+- See Section 6.2 for more details on using the GinanYAMLInspector.
+
+### 4.2 Monitoring & Output (Right Panel)
+
+The right-hand panel contains all the monitoring tools for Ginan-UI's functionality and Ginan's processing, as well as managing your CDDIS credentials.
+
+#### "CDDIS Credentials" Button
+
+- Opens a dialog to enter your NASA EarthData username and password.
+
+- This is required for downloading product from CDDIS archives.
+
+- Credentials are validated against CDDIS servers before being saved. On success credentials are stored in a `.netrc` or `_netrc` file in your home directory (depending on the platform)
+
+#### "Workflow" Tab
+
+- Logs Ginan-UI workflow and automation messages as well as any warnings or errors with usage. Product download progress is displayed within progress bars.
+
+- Text is read-only but can be selected and copied for reporting any issues.
+
+#### "Console" Tab
+
+- Streams the complete `stdout` / `stderr` from the Ginan PEA executable as it processes, as well as the relevant log messages.
+
+- Text is read-only but can be selected and copied for reporting any issues.
+
+#### "Visualisation" Section
+
+- The visualisation panel displays an interactive HTML plot that is generated using the `plot_pos.py` script after PEA completes its processing. It allows the user to view, pan, zoom, hover over tooltips, and toggle legends.
+
+- Below the visualisation panel are controls for managing how you view the plots:
+
+  - **Visualisation selector dropdown:** Switch between different generated plots (e.g., position plots, smoothed position plots). This dropdown is automatically populated based on the HTML files generated during processing.
+
+  - **"Enlarge" button:** Opens the current visualisation in a separate resizable pop-out window. This provides a larger viewing area while keeping Ginan-UI accessible in the background. The pop-out window uses an embedded browser (QWebEngineView) and can be freely resized, minimized, or maximized.
+
+  - **"Open in Browser" button:** Opens the currently enabled visualisation plot in your system's default web browser for full-screen viewing or external analysis.
+
+- **Note:** Plot visualisation is only available when the corresponding output file type is enabled in the Output tab. For example, position plots require the POS output to be enabled.
+
+### 4.3 Process Control
+
+#### "Process" Button
+
+- The green button in the bottom-left. Initiates Ginan's processing.
+
+- Will remain disabled until all required inputs are configured: Valid Observation file, Output directory, Mode parameter, and PPP products available.
+
+- Will disable when processing commences.
+
+#### "Stop" Button
+
+- The red button in the bottom-left. Requests a graceful termination of product downloads and PEA's execution.
+
+- After the stop completes, the "Process" button will re-enable again.
+
+## 5. Understanding the Ginan-UI Workflow
+
+### 5.1 What Happens When You Click "Process"
+
+Once all required parameters within the UI are filled and the "Process" button is clicked, Ginan-UI will begin downloading the required dynamic products from the CDDIS EarthData servers. These primarily include the `.bia`, `.clk`, `.nav (BRDC)` and `.sp3` files. Each downloaded file is verified against its SHA512 checksum published on the CDDIS server to ensure the download is complete and uncorrupted. If a previously downloaded product is found in the archive from a prior processing run, it will be restored from the archive rather than re-downloaded.
+
+Ginan-UI will also download and validate the IGS CRD SINEX file for your observation date, cross-checking the receiver metadata from your RINEX file against the IGS station database. Any discrepancies are reported in the Workflow log.
+
+#### Ocean and Atmospheric Loading Support
+
+Before PEA processing begins, Ginan-UI automatically verifies that ocean and atmospheric tide loading corrections are available for your station:
+
+- **BLQ file verification:** Ginan-UI checks the configured `.BLQ` files (referenced in `inputs.tides.ocean_tide_loading_blq_files` and `inputs.tides.atmos_tide_loading_blq_files`) to determine if your station already has loading coefficients.
+
+- **Automatic generation:** If your station is not found in the existing BLQ files, Ginan-UI will automatically generate station-specific loading corrections using the `interpolate_loading` tool:
+
+  1. Downloads loading grid files (`oceantide.nc` and `atmtide.nc`) if not already present
+  2. Runs `interpolate_loading` to compute ocean tide loading coefficients from your station's ECEF coordinates and writes them to a `{STATION}_ocean.BLQ` file
+  3. Runs `interpolate_loading` again to compute atmospheric tide loading coefficients and writes them to a `{STATION}_atmos.BLQ` file
+  4. Updates the YAML configuration to include these new BLQ files alongside the global reference files
+
+- **Progress reporting:** The loading generation process is reported in the "Workflow" log with progress indicators showing download and computation status.
+
+- **Configuration preservation:** When "Overwrite Config with UI Values" is disabled in the YAML Config tab, the loading BLQ generation still occurs and updates the configuration file. This ensures proper tide loading corrections are applied even when you are manually managing the YAML configuration.
+
+This verification confirms that tide loading corrections are properly configured without requiring the user to manually interpolate or manage BLQ files.
+
+#### PEA Execution
+
+Once all products and loading corrections have been prepared, Ginan's PEA tool will be automatically executed with the generated `.yaml` configuration file. This processing can be observed within the "Console" log tab which should look similar to PEA's command-line interface output.
+
+Once it finishes processing, the `plot_pos.py` script will be called automatically to plot the resulting `.pos` and `_smoothed.pos` files generated during processing, and the plots will appear within the UI under the "Visualisation" heading.
+
+### 5.2 Product Downloading (Static vs. Dynamic)
+
+Ginan-UI automatically downloads all required products for GNSS processing from NASA's CDDIS (Crustal Dynamics Data Information System) archives. These products are split into two categories: **static** and **dynamic**.
+
+#### Static Products (Metadata)
+
+Static products are reference files that rarely change and are downloaded once when Ginan-UI is launched for the first time. These include:
+
+- **ATX** (Antenna exchange format) - Antenna phase centre corrections
+
+- **ALOAD** (Atmospheric loading) - Atmospheric pressure loading models
+
+- **IGRF** (International Geomagnetic Reference Field) - Geomagnetic field models
+
+- **OLOAD** (Ocean loading) - Ocean tide loading models
+
+- **OPOLE** (Ocean pole tide) - Ocean pole tide models
+
+- **PLANET** (Planetary ephemeris) - Solar system body positions
+
+- **SAT-META** (Satellite metadata) - Satellite characteristics and properties
+
+- **YAW** (Yaw attitude) - Satellite attitude models
+
+- **GPT2** (Global Pressure and Temperature 2) - Tropospheric models
+
+These files are stored in `scripts/GinanUI/app/resources/inputData/products/` and are automatically archived when they become outdated (typically after one week). Fresh copies are then downloaded on the next program launch.
+
+#### Dynamic Products (Observation-Specific)
+
+Dynamic products are files specific to the provided RINEX observations and change based on the observation's time window and chosen PPP provider. These are downloaded each time you click "Process" and include:
+
+- **CLK** (Clock products) - Precise satellite and station clock corrections
+
+- **SP3** (Precise ephemeris) - Precise satellite orbit positions
+
+- **BIA** (Bias products) - Code and phase biases for multi-GNSS processing
+
+- **NAV** (Navigation/broadcast) - Broadcast navigation messages (BRDC files)
+
+Ginan-UI will automatically determine which dynamic products you need based on:
+
+1. The time window provided (either manually set or extracted from your RINEX observation file)
+
+2. The PPP provider / series / project selected in the UI
+
+3. The constellations present in your data (GPS, GLONASS, Galileo, BeiDou, QZSS)
+
+#### REPRO3 Fallback for Older Data
+
+For older RINEX files (typically more than three years old), the standard PPP products may not be available in the main CDDIS directory. In these cases, Ginan-UI will automatically search the REPRO3 (third IGS reprocessing campaign) directory for reproduction products. These reprocessed products provide high-quality orbits, clocks, and biases for historical data that may otherwise be unavailable.
+
+When REPRO3 products are used, you will see a notification in the Workflow log indicating that the fallback occurred.
+
+#### Download Process
+
+When you click "Process", Ginan-UI will:
+
+1. Check your CDDIS credentials are valid
+
+2. Query for the available products for the provided time window from the CDDIS servers
+
+3. Check the local archive for any previously downloaded products that can be restored, to avoid re-downloading
+
+4. Download any remaining missing dynamic products with progress indicators shown in the "Workflow" log tab
+
+5. Verify each downloaded file against its SHA512 checksum published on the CDDIS server to confirm integrity
+
+6. Verify all required products are present before launching PEA
+
+If a product cannot be found (which is common for either very old or very new RINEX observation files), Ginan-UI will inform you that the selected provider does not have the products available for your time window yet. Different PPP providers publish their products with varying latencies. Ultra-rapid (ULT) are available within hours, Rapid (RAP) are available within about one day, and Final (FIN) may take one or two weeks.
+
+All downloaded products are stored in `scripts/GinanUI/app/resources/inputData/products/` alongside the archived products from previous processing iterations in timestamped archive folders.
+
+### 5.3 Product Archival
+
+Ginan-UI will automatically archive both products and output files to prevent conflicts between processing runs and to keep your directories clean and organised.
+
+#### Product Archival
+
+Product files are automatically archived in the following situations:
+
+- **On Application Startup:** Static products older than seven days are moved to timestamped archive folders within `scripts/GinanUI/app/resources/inputData/products/archived/`. Fresh versions are then downloaded to replace them.
+
+- **When Loading a New RINEX File:** If you select a different RINEX observation file, all dynamic products from the previous processing iteration are archived with the tag `rinex_change_[timestamp]`. This prevents incompatible products from different time windows being mixed up.
+
+- **When Changing PPP Selections:** If you change your PPP provider, series, or project selection the relevant dynamic products will be archived with the tag `PPP_selection_change_[timestamp]`. However, reusable files like broadcast navigation messages will be preserved.
+
+#### Output Archival
+
+When you start a new processing run, existing output files in your selected output directory are automatically moved to `output/archive/[timestamp]/` before PEA processing commences. This includes:
+
+- `.pos` files (position solutions)
+- `.log` files (PEA execution logs)
+- `.txt` and `.json` files (configuration artifacts)
+- `.html` visualisation files (if a visualisation directory was used)
+
+This makes sure that every processing iteration produces a clean output and does not overwrite results from previous iterations.
+
+### 5.4 Where Files are Stored
+
+Ginan-UI has several important directories for its operation. All paths are relative to the Ginan installation directory unless explicitly specified by the user (observation and output directories).
+
+#### Product Storage
+
+- **Location:** `scripts/GinanUI/app/resources/inputData/products/`
+
+- **Contents:** All static and dynamic products downloaded from NASA's CDDIS Earthdata archives.
+
+- **Subdirectories:** 
+  - `tables/` - Static metadata files (ALOAD, OLOAD, GPT2)
+  - `archived/` - Timestamped folders containing archived products
+
+#### Configuration Files
+
+- **Template:** `scripts/GinanUI/app/resources/Yaml/default_config.yaml`
+
+- **Generated Config:** `scripts/GinanUI/app/resources/ppp_generated.yaml`
+
+- **CDDIS Credentials:** Platform-specific (See Section 4.2)
+  - Windows: `%USERPROFILE%\.netrc` or `%USERPROFILE%\_netrc`
+  - MacOS / Linux: `~/.netrc`
+
+#### Output Files
+
+- **Location:** User-selected via the "Output" button
+- **Contents:** PEA-generated `.pos` files, `.log files`, and processing artifacts
+- **Visualisations:** HTML plot files generated by `plot_pos.py`
+- **Subdirectories:** `archive/` - Timestamped folders containing previous run outputs
+
+#### Observation Data
+
+- **Location:** Selected by the user via the "Observations" button
+- Ginan-UI will read but does not modify your RINEX files
+
+### 5.5 How the YAML Config is Generated
+
+The `.yaml` configuration file that is generated for Ginan's PEA processing originates from the template config file located within `scripts/GinanUI/app/resources/Yaml/default_config.yaml`. This template file is copied if no config file exists at `scripts/GinanUI/app/resources/ppp_generated.yaml`. If `ppp_generated.yaml` already exists, Ginan-UI reuses it and updates only the fields it manages so manual edits and unsupported keys are preserved where possible.
+
+If you would like to generate a fresh `ppp_generated.yaml` file, use the "Reset Config" button or delete `ppp_generated.yaml`; on the next processing run, a new config file will be generated from the `default_config.yaml` template file.
+
+## 6. Advanced Usage
+
+### 6.1 Manual YAML Editing
+
+For experienced users of Ginan who need fine-grained control over Ginan's processing, the `.yaml` configuration file can be manually edited by clicking the "Show Config" button in the YAML Config tab. This will open `ppp_generated.yaml` in your system's default text editor.
+
+#### Controlling Automatic Overwrites
+
+The "Overwrite Config with UI Values" toggle in the YAML Config tab controls how Ginan-UI interacts with your YAML file:
+
+- **When enabled (default):** Ginan-UI will automatically update fields marked with `#AUTO` comments in the YAML file whenever you click the "Show Config" or "Process" buttons. This ensures the config values remain synchronised with the UI selections.
+
+- **When disabled:** Your manual edits are fully preserved. Ginan-UI will not overwrite any fields in the YAML file which gives you complete control. This is useful when you need to configure advanced options that are not exposed in the UI.
+
+**Important:** Even with automatic overwrites disabled, ocean and atmospheric loading BLQ file generation will still update the configuration file to ensure proper tide loading corrections are applied.
+
+#### Persistence of Manual Changes
+
+When "Overwrite Config with UI Values" is enabled, Ginan-UI will only update specific fields marked with `#AUTO`:
+
+- RINEX metadata (time windows, constellations, receiver / antenna information)
+
+- Product file paths for downloaded PPP products
+
+- Output directory paths
+
+- Ocean and atmospheric loading BLQ file paths
+
+All other parameters like processing strategies, filter settings, quality control thresholds, and satellite-specific options will remain untouched, preserving your manual customisations.
+
+**Note:** YAML artefacts may persist between sessions. For example, marker names within `receiver_options` may remain if not explicitly overwritten, though this rarely causes issues.
+
+#### Resetting to Default
+
+If you experience any configuration errors and want to start fresh, you have two options:
+
+**Option 1: Use the Reset Config Button**
+
+Click the "Reset Config" button in the YAML Config tab. This will delete the configuration file and regenerate it from the default template, and reset all UI fields to their initial state. A confirmation dialog will appear before the reset proceeds.
+
+**Option 2: Manual Reset**
+
+1. Delete `scripts/GinanUI/app/resources/ppp_generated.yaml`
+
+2. On the next processing run, a clean configuration file will be generated from the template at `scripts/GinanUI/app/resources/Yaml/default_config.yaml`
+
+**For executable releases of Ginan-UI**, the config is located at `_internal/scripts/GinanUI/app/resources/ppp_generated.yaml`
+
+**Warning:** Invalid YAML syntax (like incorrect indentation, mismatched quotes, and malformed lists) will cause PEA to fail. Please verify your formatting if you encounter configuration-related errors in the logs.
+
+### 6.2 Using the GinanYAMLInspector
+
+The GinanYAMLInspector is a browser-based configuration tool that provides a more comprehensive interface for editing Ginan's YAML configuration than the main Ginan-UI panels expose. It can be accessed by clicking the "Edit Config in Inspector" button in the YAML Config tab.
+
+#### What is the GinanYAMLInspector?
+
+The GinanYAMLInspector is an HTML-based interactive form generated by Ginan's PEA executable. It provides structured input fields for nearly all configuration options available in Ginan, organised by category. This tool is particularly useful for:
+
+- Making bulk configuration changes across multiple parameters
+- Accessing advanced configuration options not exposed in Ginan-UI's main interface
+- Reviewing the full range of available Ginan configuration options
+- Fine-tuning processing parameters for specialised use cases
+
+#### How to Use the Inspector
+
+1. **Opening the Inspector:** Click the "Edit Config in Inspector" button in the YAML Config tab. Ginan-UI will:
+   - Ensure the inspector HTML file exists (should be auto-generated via `pea -Y 4`, do manually if needed and place the HTML file in `scripts/GinanUI/app/resources/Yaml/`)
+   - Open the inspector in a new browser window
+   - Load your current `ppp_generated.yaml` configuration
+   - Open the inspector in an embedded browser window
+
+2. **Auto-Import:** When the inspector opens, your current configuration is automatically loaded into all the form fields. You don't need to manually import the file.
+
+3. **Making Changes:** Navigate through the inspector's sections and modify any parameters you wish to change. The inspector organises configuration options into logical categories (inputs, processing options, outputs, etc.).
+
+4. **Generating YAML:** After making your changes, click the "Generate YAML" button in the inspector. This converts your form inputs into YAML format and displays it in a text area.
+
+5. **Saving Changes:** Click the "Save file" button in the inspector. Instead of downloading a file, Ginan-UI intercepts this action and:
+   - Validates and sanitises the generated YAML (e.g., properly quotes wildcard patterns like `*.CLK`)
+   - Deep-merges the inspector's output onto your existing `ppp_generated.yaml` file
+   - Preserves any configuration keys that the inspector doesn't know about
+   - Updates the UI fields to reflect the saved changes
+   - Displays a confirmation message
+
+#### Key Features
+
+**Intelligent Merging:** Unlike manual file editing, the inspector save process preserves configuration keys that weren't included in the inspector's output. For example, if you only edited processing parameters in the inspector, your custom output settings and constellation-specific configurations remain untouched.
+
+**Wildcard Handling:** The inspector automatically handles special YAML characters. Wildcard patterns (e.g., `*.CLK`, `*_ocean.BLQ`) are properly quoted to avoid errors in parsing the YAML.
+
+**Fallback Validation:** If the merged configuration produces invalid YAML, Ginan-UI automatically falls back to a clean write without comment preservation, ensuring the save always succeeds.
+
+**Respects Overwrite Toggle:** The inspector works independently of the "Overwrite Config with UI Values" toggle. You can use the inspector to make changes even when automatic UI overwrites are disabled.
+
+#### When to Use the Inspector
+
+Using GinanYAMLInspector is not required, however it can be useful for more advanced users. Use it when you need to:
+
+- Configure many parameters not available in Ginan-UI's main interface (e.g., satellite-specific quality control settings, advanced filter parameters)
+- Make coordinated changes across multiple related configuration sections
+- Review the full scope of Ginan's configuration options to understand what's available
+- Quickly enable / disable features by checking or unchecking inspector form fields
+
+For simple changes like adjusting the time window, mode, or output formats, the main Ginan-UI interface is more convenient.
+
+## 7. Troubleshooting
+
+### 7.1 Common Issues
+
+| Issue                                                                   | Cause                                                                                                                                                                                                      | Fix                                                                                                                                                                                                                                                             |
+|-------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Ginan-UI launched to a black screen, then crashed                       | Ginan-UI's usage of the Qt framework can rarely cause race conditions causing a segmentation fault.                                                                                                        | Try launching Ginan-UI again, it almost always fixes itself after first-time launch.                                                                                                                                                                            |
+| Missing library errors on Linux (e.g., `libxcb`, `libGL`, Qt libraries) | Required Qt dependencies not installed on your distribution.                                                                                                                                               | Install Qt dependencies for your distribution:<br>**Ubuntu / Debian:** `sudo apt install libxcb-xinerama0 libxcb-cursor0 libgl1`<br>**Fedora:** `sudo dnf install qt6-qtbase qt6-qtwebengine`<br>**Arch:** `sudo pacman -S qt6-base qt6-webengine`              |
+| Process button greyed out                                               | One of the following:<br>- Observations not selected (`.rnx`)<br>- Output directory not selected<br>- Analysis centers not processed yet                                                                   | Ensure you have selected an observation file and output directory. After the observation file has been selected, the analysis centers will automatically begin processing. Once the "PPP Provider" field has been populated, the button will unlock.            |
+| Missing products or downloading duplicate products when process clicked | Output directory same as product directory or log message suggesting a file is downloaded when its just being existence checked.                                                                           | Ensure output directory is separate from the product directory. If there's no product directory selection made, the product directory path is `ginan/scripts/GinanUI/app/resources/inputData/products`.                                                         |
+| Program crash when clicking "Process"                                   | "`Core dump whilst thread ''`" occurs when the user uses the "Stop" button before the first download has started and subsequently clicked the process button again before the thread has a chance to exit. | The thread cannot exit whilst raising a request for status. Wait a few seconds for the "stopped thread" message in the Console before clicking Process again.                                                                                                   |
+| Connection reset errors                                                 | CDDIS server timeouts and / or network problems.                                                                                                                                                           | Wait 30 seconds and then try again. If the issue persists, check your network connection. Note: CDDIS servers experienced reliability issues during the 2025 US government shutdown.                                                                            |
+| CDDIS authentication failed                                             | Invalid or expired Earthdata credentials, or credentials not properly saved to `.netrc` / `_netrc` file.                                                                                                   | Re-enter your credentials via the "CDDIS Credentials" button. Verify your account is active at [Earthdata Login](https://urs.earthdata.nasa.gov). Check that `.netrc` or `_netrc` exists in your home directory with correct permissions (0600 on Linux/macOS). |
+| PEA configuration error / YAML syntax error                             | Manual edits to the YAML config contain syntax errors (incorrect indentation, mismatched quotes, malformed lists).                                                                                         | Verify your YAML formatting in the config editor. If errors persist, use the "Reset Config" button or delete `ppp_generated.yaml` to reset to default template (see Section 6.1).                                                                               |
+| Plots not appearing in Visualisation panel                              | PEA processing failed before generating `.pos` files, the `plot_pos.py` script encountered errors, or the POS output is disabled in the Output tab.                                                        | Check the Console for PEA errors. Verify that `.pos` files exist in your output directory. Ensure POS output is enabled in the Output tab. If files exist but plots don't render, check for Qt WebEngine issues in the Console.                                 |
+| Disk space errors during processing                                     | Insufficient disk space for downloading products or writing PEA outputs.                                                                                                                                   | Free up disk space. Products can consume several GB depending on time window and number of constellations. Check available space in both the products directory and your selected output directory.                                                             |
+| Constellation mismatch warning                                          | The constellations in the provided RINEX file do not match those available in the selected PPP provider's SP3 file.                                                                                        | Select a different PPP provider that supports the constellations in your RINEX file, or disable the unsupported constellations in the "General" config tab's "Constellations" field.                                                                            |
+| No valid PPP providers found for older data                             | The RINEX file is from a time period where standard PPP products are no longer available in the main CDDIS directory.                                                                                      | Ginan-UI will automatically attempt to use REPRO3 products for older data. If no providers are found, the data may be too old for available PPP products.                                                                                                       |
+| Ocean / atmospheric loading BLQ generation failed                       | The `interpolate_loading` tool failed to generate loading corrections, or the loading grid files could not be downloaded.                                                                                  | Check the Workflow log for specific error messages. Ensure you have a valid apriori position for your station. If the loading grid files are missing, check your network connection and CDDIS credentials. Processing may continue without loading corrections but with reduced accuracy. |
+| GinanYAMLInspector not opening or HTML generation failed                | The inspector HTML file doesn't exist and couldn't be auto-generated, or the PEA executable is not available.                                                                                              | Manually generate the inspector by running `pea -Y 4` from the command line and place the output `GinanYamlInspector.html` in `scripts/GinanUI/app/resources/Yaml/`. Ensure the PEA executable is accessible in your PATH or in the expected location.          |
+| Inspector save produces invalid YAML                                    | The inspector generated YAML with syntax errors or the merge process failed.                                                                                                                               | Check the Workflow log for specific errors. Ginan-UI has automatic fallback handling, but if issues persist, try using "Show Config" to manually edit the YAML instead. Report persistent issues with the inspector output.                                     |
+| Manual YAML edits being overwritten                                     | The "Overwrite Config with UI Values" toggle is enabled and UI values are being written to `#AUTO` fields.                                                                                                 | Disable the "Overwrite Config with UI Values" toggle in the YAML Config tab before making manual edits. This prevents Ginan-UI from overwriting your changes when you click "Show Config" or "Process".                                                         |
+
+### 7.2 Log Message Interpretation
+
+The "Workflow" / "Console" log in the right panel displays real-time output from Ginan-UI's processing. These logs redirect what would normally appear in the terminal.
+
+#### What You Will See
+
+The logs stream messages from them:
+
+- **Product downloading:** URLs being fetched, file names, and download progress.
+
+- **Ginan PEA execution:** The complete `stdout / stderr` from the PEA executable as it processes your data.
+
+- **Toast notifications:** User feedback messages about the status of operations.
+
+#### When Things Go Wrong
+
+Common issues you may see in the logs:
+
+- **Network / Connection errors:** CDDIS server timeouts or network problems. Wait 30 seconds and retry.
+
+- **Missing products:** The selected PPP Provider may not have products available for your time window, or they haven't been published yet.
+
+- **YAML configuration errors:** Syntax errors may cause PEA to fail on startup if you have manually edited the `.yaml` config file.
+
+- **Disk space issues:** Ginan-UI has encountered problems when disk space is very limited. Please ensure you have at least 2 - 3 GB of disk space free.
+
+#### Tips
+
+- The logs are read-only, but you can select and copy text for reporting issues.
+
+- It auto-scrolls to the newest output.
+
+- Messages will persist until you start a new processing run.
+
+- The raw PEA output can be verbose (very verbose), this is normal for GNSS processing tools.
+
+If you encounter persistent errors, please copy the relevant log outputs when reporting issues (See Section 7.3)
+
+### 7.3 Where To Get Help
+
+If you encounter issues not covered in this troubleshooting guide, or need assistance with Ginan-UI:
+
+#### Primary Contact
+
+Sam Greenwood (Ginan-UI Engineer) - samuel.greenwood@ga.gov.au
+
+#### Additional Resources
+
+GitHub Issues: Report bugs or request features at the [Ginan-UI](https://github.com/GeoscienceAustralia/ginan) repository issue tracker
+
+Ginan Documentation: For questions about Ginan itself (not the UI), consult the main [Ginan documentation](https://geoscienceaustralia.github.io/ginan/)
+
+CDDIS Support: For issues with NASA Earthdata credentials or archive access, visit the [CDDIS help page](https://www.earthdata.nasa.gov/centers/cddis-daac/contact)
+
+When reporting issues, please include:
+- Your operating system and version
+- The steps you took before encountering the problem
+- Any error messages from the Workflow / Console logs
+- Screenshots if relevant
+
+**Note:** Ginan-UI was developed as part of the ANU TechLauncher program in collaboration with Geoscience Australia. For general enquiries about Geoscience Australia's GNSS analysis capabilities, visit [www.ga.gov.au](https://www.ga.gov.au)
+
+## 8. FAQ
+
+Here are some answers to the frequently asked questions:
+
+**Q:** *"Where are products downloaded to?"*
+
+**A:** Products are downloaded to: `ginan/scripts/GinanUI/app/resources/inputData/products`. Current static products are stored here. Dynamic products are downloaded to the same folder but are moved to an archive folder on app-startup and when the `.rnx` file changes.
+
+**Q:** *"Where is the `.yaml` config file stored?"*
+
+**A:** : The `.yaml` config file used by PEA is in `ginan/scripts/GinanUI/app/resources/ppp_generated.yaml` which can be edited with the "Show Config" button. The template file in `ginan/scripts/GinanUI/app/resources/Yaml/default_config.yaml` is copied and used when no `ppp_generated.yaml` can be found.
+
+**Q:** *"Why is PEA giving me a configuration error?"*
+
+**A:** This could be due to a product file being deleted erroneously, which would resolve on the next click of the "Process" button, or due to manual changes to the `.yaml` config file containing invalid YAML syntax. If you wish to reset to the default config, click the "Reset Config" button in the "YAML" tab, or delete the file in `ginan/scripts/GinanUI/app/resources/ppp_generated.yaml` and then run the app again.
+
+**Q:** *"How do I reset the configuration to default?"*
+
+**A:** Click the "Reset Config" button in the "YAML" tab. This will delete and regenerate the configuration file from the default template and clear all UI fields back to their initial state. Alternatively, you can manually delete the `ppp_generated.yaml` file.
+
+**Q:** *"What does the 'Overwrite Config with UI Values' toggle do?"*
+
+**A:** This toggle in the YAML Config tab controls whether Ginan-UI automatically updates the YAML configuration file with your UI selections. When enabled (default), clicking either the "Show Config" or "Process" buttons will write UI values to fields marked `#AUTO` in the YAML. When disabled, your manual edits are fully preserved and Ginan-UI won't overwrite any fields. Note that ocean and atmospheric loading BLQ file generation still occurs even when disabled.
+
+**Q:** *"How do I use the GinanYAMLInspector?"*
+
+**A:** Click the "Edit Config in Inspector" button in the YAML Config tab. Your current configuration will be automatically loaded. Make changes in the inspector's form fields, click "Generate yaml", then click "Save file". The changes will be intelligently merged back into your configuration while preserving keys the inspector doesn't manage. See Section 6.2 for detailed instructions.
+
+**Q:** *"What are ocean and atmospheric loading BLQ files?"*
+
+**A:** BLQ files contain tide loading corrections that account for the deformation of the Earth's crust due to ocean and atmospheric tides. Ginan-UI automatically checks if your station has these corrections and generates them if needed using the `interpolate_loading` tool. This happens automatically before PEA processing begins, ensuring accurate positioning results.
+
+**Q:** *"Why is the plot visualisation disabled or not showing?"*
+
+**A:** Plot visualisation depends on the corresponding output file being enabled in the "Output" tab. If you have disabled the POS output, the position plots will not be available. Enable the required output type and re-run processing.
+
+**Q:** *"How do I view the visualisation plots in a larger window?"*
+
+**A:** Use the "Enlarge" button below the visualisation panel to open the current plot in a separate resizable pop-out window. This provides a larger viewing area while keeping Ginan-UI accessible in the background. Alternatively, use the "Open in Browser" button to view the plot in your system's default web browser.
+
+**Q:** *"Can I process older RINEX files?"*
+
+**A:** Yes. Ginan-UI supports RINEX v2, v3, and v4 files. For older data (typically more than three years old), Ginan-UI will automatically search the REPRO3 directory for reprocessed products if standard products are not available.
+
+**Q:** *"Where can I learn more about Ginan itself?"*
+
+**A:** Visit Ginan's GitHub [here](https://github.com/GeoscienceAustralia/ginan) to learn more about the tool!
+
+## 9. Acknowledgements
+This project was designed during the Australian National University's TechLauncher program in 2025. Ginan-UI was created for Geoscience Australia by:
+
+- Sam Greenwood
+- Ryan Foote
+- Harry Baard
+- Kenita Tan
+- Yuliang Yang
+- Fan Jin
+- Songxuan He
+
+Special thanks to Simon McClusky at Geoscience Australia for their continuous support and guidance throughout the project's development.
